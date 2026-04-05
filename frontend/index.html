@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PufferPantry</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <header>
+    <h1>PufferPantry</h1>
+    <p class="subtitle">meal planning, powered by pufferfish energy</p>
+  </header>
+
+  <nav class="tab-bar">
+    <button class="tab active" data-tab="recipes">Recipes</button>
+    <button class="tab" data-tab="shopping">
+      Shopping List
+      <span class="tab-badge hidden" id="shopping-badge">0</span>
+    </button>
+  </nav>
+
+  <main>
+    <!-- Recipes tab -->
+    <div id="tab-recipes" class="tab-panel">
+      <section class="toolbar">
+        <div class="toolbar-left">
+          <div class="dropdown" id="add-dropdown">
+            <button class="btn btn-primary" id="add-recipe-toggle">+ Add Recipe</button>
+            <div class="dropdown-menu hidden" id="add-menu">
+              <button class="dropdown-item" data-action="photo">Scan from Photo</button>
+              <button class="dropdown-item" data-action="url">Import from URL</button>
+              <button class="dropdown-item" data-action="manual">Enter Manually</button>
+            </div>
+          </div>
+        </div>
+        <div class="size-toggle" id="size-toggle">
+          <button data-size="compact" class="btn btn-secondary btn-small" title="Compact">&#9776;</button>
+          <button data-size="medium" class="btn btn-secondary btn-small" title="Medium">&#9638;</button>
+          <button data-size="large" class="btn btn-secondary btn-small" title="Large">&#11200;</button>
+        </div>
+      </section>
+
+      <section class="filter-bar" id="filter-bar">
+        <select id="filter-meal" class="filter-select">
+          <option value="">All Meals</option>
+          <option value="dinner">Dinner</option>
+          <option value="lunch">Lunch</option>
+          <option value="breakfast">Breakfast</option>
+          <option value="dessert">Dessert</option>
+          <option value="drinks">Drinks</option>
+        </select>
+        <select id="filter-protein" class="filter-select">
+          <option value="">All Proteins</option>
+        </select>
+        <select id="filter-cuisine" class="filter-select">
+          <option value="">All Cuisines</option>
+        </select>
+      </section>
+
+      <section id="form-container" class="hidden"></section>
+
+      <section id="recipe-list" class="recipe-grid">
+        <!-- recipe cards inserted here by JS -->
+      </section>
+    </div>
+
+    <!-- Shopping List tab -->
+    <div id="tab-shopping" class="tab-panel hidden">
+      <div id="shopping-content"></div>
+    </div>
+  </main>
+
+  <!-- Load components first, then app.js which uses them -->
+  <script src="/js/components/recipe-card.js"></script>
+  <script src="/js/components/recipe-detail.js"></script>
+  <script src="/js/components/photo-upload.js"></script>
+  <script src="/js/components/url-import.js"></script>
+  <script src="/js/components/recipe-form.js"></script>
+  <script src="/js/components/shopping-list.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

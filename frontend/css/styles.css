@@ -452,6 +452,21 @@ h1 {
   font-size: 0.85rem;
 }
 
+/* --- Low-confidence ingredient warning --- */
+.ing-low-confidence {
+  border: 2px solid #f39c12;
+  border-radius: var(--radius);
+  padding: 0.4rem;
+  background: rgba(243, 156, 18, 0.05);
+}
+
+.ing-confidence-warning {
+  grid-column: 1 / -1;
+  font-size: 0.8rem;
+  color: #e67e22;
+  padding-top: 0.2rem;
+}
+
 /* --- Ingredient groups in form --- */
 .ingredient-group {
   margin-bottom: 1rem;

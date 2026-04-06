@@ -193,6 +193,15 @@ function addIngredientRow(container, data = null) {
     row.querySelector(".ing-name").value = data.name || "";
     row.querySelector(".ing-amount").value = data.amount || "";
     row.querySelector(".ing-unit").value = data.unit || "";
+
+    // Flag low-confidence amounts for user review
+    if (data.amount_confidence === "low" || data.amount_confidence === "medium") {
+      row.classList.add("ing-low-confidence");
+      const warning = document.createElement("div");
+      warning.className = "ing-confidence-warning";
+      warning.textContent = "⚠ Please double-check this amount — it may have been misread from the photo";
+      row.appendChild(warning);
+    }
   }
 
   row.querySelector(".remove-ing").addEventListener("click", () => {

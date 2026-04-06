@@ -14,6 +14,7 @@
 
   <nav class="tab-bar">
     <button class="tab active" data-tab="recipes">Recipes</button>
+    <button class="tab" data-tab="pantry">Pantry</button>
     <button class="tab" data-tab="shopping">
       Shopping List
       <span class="tab-badge hidden" id="shopping-badge">0</span>
@@ -65,6 +66,36 @@
       </section>
     </div>
 
+    <!-- Pantry tab -->
+    <div id="tab-pantry" class="tab-panel hidden">
+      <section class="toolbar" id="pantry-toolbar">
+        <div class="toolbar-left">
+          <button class="btn btn-primary hidden" id="setup-storage-btn">Set Up Storage</button>
+          <div class="dropdown" id="pantry-add-dropdown">
+            <button class="btn btn-primary" id="pantry-add-toggle">+ Add Items</button>
+            <div class="dropdown-menu hidden" id="pantry-add-menu">
+              <button class="dropdown-item" data-action="pantry-scan">Scan Shelf Photo</button>
+              <button class="dropdown-item" data-action="pantry-manual">Add Manually</button>
+            </div>
+          </div>
+        </div>
+        <div class="pantry-filters">
+          <select id="filter-location" class="filter-select">
+            <option value="">All Locations</option>
+            <option value="Fridge">Fridge</option>
+            <option value="Freezer">Freezer</option>
+            <option value="Pantry">Pantry</option>
+            <option value="Spice Rack">Spice Rack</option>
+            <option value="Counter">Counter</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+      </section>
+
+      <section id="pantry-form-container" class="hidden"></section>
+      <section id="pantry-list"></section>
+    </div>
+
     <!-- Shopping List tab -->
     <div id="tab-shopping" class="tab-panel hidden">
       <div id="shopping-content"></div>
@@ -78,6 +109,10 @@
   <script src="/js/components/url-import.js"></script>
   <script src="/js/components/recipe-form.js"></script>
   <script src="/js/components/shopping-list.js"></script>
+  <script src="/js/components/pantry-list.js"></script>
+  <script src="/js/components/pantry-form.js"></script>
+  <script src="/js/components/pantry-scan.js"></script>
+  <script src="/js/components/storage-setup.js"></script>
   <script src="/js/app.js"></script>
 </body>
 </html>

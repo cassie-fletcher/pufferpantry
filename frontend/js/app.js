@@ -4,6 +4,7 @@
  */
 
 const API = "/api/recipes";
+const PANTRY_API = "/api/pantry";
 
 document.addEventListener("DOMContentLoaded", () => {
   const recipeList = document.getElementById("recipe-list");
@@ -18,10 +19,20 @@ document.addEventListener("DOMContentLoaded", () => {
   const filterProtein = document.getElementById("filter-protein");
   const filterCuisine = document.getElementById("filter-cuisine");
 
+  // Pantry elements
+  const pantryListEl = document.getElementById("pantry-list");
+  const pantryFormContainer = document.getElementById("pantry-form-container");
+  const pantryToolbar = document.getElementById("pantry-toolbar");
+  const pantryAddDropdown = document.getElementById("pantry-add-dropdown");
+  const pantryAddToggle = document.getElementById("pantry-add-toggle");
+  const pantryAddMenu = document.getElementById("pantry-add-menu");
+  const filterLocation = document.getElementById("filter-location");
+
   // --- Tab switching ---
   const tabs = document.querySelectorAll(".tab");
   const tabPanels = {
     recipes: document.getElementById("tab-recipes"),
+    pantry: document.getElementById("tab-pantry"),
     shopping: document.getElementById("tab-shopping"),
   };
 
@@ -34,9 +45,11 @@ document.addEventListener("DOMContentLoaded", () => {
       Object.entries(tabPanels).forEach(([name, panel]) => {
         panel.classList.toggle("hidden", name !== target);
       });
-      // Generate shopping list when switching to that tab
+      // Load data when switching to tabs
       if (target === "shopping") {
         renderShoppingTab();
+      } else if (target === "pantry") {
+        loadPantryItems();
       }
     });
   });
@@ -397,5 +410,187 @@ document.addEventListener("DOMContentLoaded", () => {
 
     await fetch(`${API}/${id}`, { method: "DELETE" });
     loadRecipes();
+  }
+
+  // ===================================================================
+  // PANTRY
+  // ===================================================================
+
+  const STORAGE_API = "/api/storage-areas";
+  const setupStorageBtn = document.getElementById("setup-storage-btn");
+  let cachedStorageAreas = [];
+
+  // --- Pantry dropdown ---
+  pantryAddToggle.addEventListener("click", () => {
+    pantryAddMenu.classList.toggle("hidden");
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!pantryAddDropdown.contains(e.target)) {
+      pantryAddMenu.classList.add("hidden");
+    }
+  });
+
+  pantryAddMenu.addEventListener("click", (e) => {
+    const item = e.target.closest("[data-action]");
+    if (!item) return;
+    pantryAddMenu.classList.add("hidden");
+
+    const action = item.dataset.action;
+    if (action === "pantry-manual") showPantryForm();
+    else if (action === "pantry-scan") showPantryScan();
+  });
+
+  // --- Setup storage button ---
+  setupStorageBtn.addEventListener("click", showStorageSetup);
+
+  // --- Pantry filter ---
+  filterLocation.addEventListener("change", () => loadPantryItems());
+
+  // --- Load storage areas ---
+  async function loadStorageAreas() {
+    const response = await fetch(STORAGE_API);
+    cachedStorageAreas = await response.json();
+
+    // Toggle setup button visibility
+    setupStorageBtn.classList.toggle("hidden", cachedStorageAreas.length > 0);
+  }
+
+  // --- Load pantry items ---
+  async function loadPantryItems() {
+    await loadStorageAreas();
+
+    const locationFilter = filterLocation.value;
+    const params = new URLSearchParams();
+    if (locationFilter) params.set("location", locationFilter);
+
+    const response = await fetch(`${PANTRY_API}?${params}`);
+    const items = await response.json();
+
+    pantryListEl.innerHTML = "";
+    const list = createPantryList({
+      items,
+      storageAreas: cachedStorageAreas,
+      onEdit: editPantryItem,
+      onDelete: deletePantryItem,
+      onUpdateQuantity: updatePantryQuantity,
+      onScanZone: showZoneScan,
+    });
+    pantryListEl.appendChild(list);
+  }
+
+  // --- Quick quantity update ---
+  async function updatePantryQuantity(id, level) {
+    await fetch(`${PANTRY_API}/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quantity_level: level }),
+    });
+    loadPantryItems();
+  }
+
+  // --- Add pantry item ---
+  function showPantryForm(initialData = null) {
+    pantryFormContainer.classList.remove("hidden");
+    pantryToolbar.classList.add("hidden");
+
+    const form = createPantryItemForm({
+      initialData,
+      onSubmit: async (data) => {
+        if (initialData && initialData.id) {
+          await fetch(`${PANTRY_API}/${initialData.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          });
+        } else {
+          await fetch(PANTRY_API, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          });
+        }
+        hidePantryForm();
+        loadPantryItems();
+      },
+      onCancel: hidePantryForm,
+    });
+
+    pantryFormContainer.innerHTML = "";
+    pantryFormContainer.appendChild(form);
+  }
+
+  // --- Edit pantry item ---
+  async function editPantryItem(id) {
+    const response = await fetch(`${PANTRY_API}/${id}`);
+    const item = await response.json();
+    showPantryForm(item);
+  }
+
+  // --- Delete pantry item ---
+  async function deletePantryItem(id) {
+    if (!confirm("Remove this item from your pantry?")) return;
+    await fetch(`${PANTRY_API}/${id}`, { method: "DELETE" });
+    loadPantryItems();
+  }
+
+  // --- Scan shelf photo (generic, non-zone) ---
+  function showPantryScan() {
+    pantryFormContainer.classList.remove("hidden");
+    pantryToolbar.classList.add("hidden");
+
+    const scan = createPantryScan({
+      onItemsConfirmed: () => {
+        hidePantryForm();
+        loadPantryItems();
+      },
+      onCancel: hidePantryForm,
+    });
+
+    pantryFormContainer.innerHTML = "";
+    pantryFormContainer.appendChild(scan);
+  }
+
+  // --- Zone-targeted scan ---
+  function showZoneScan(zoneId, storageAreaId, zoneName) {
+    pantryFormContainer.classList.remove("hidden");
+    pantryToolbar.classList.add("hidden");
+
+    const scan = createPantryScan({
+      zoneId,
+      storageAreaId,
+      zoneName,
+      onItemsConfirmed: () => {
+        hidePantryForm();
+        loadPantryItems();
+      },
+      onCancel: hidePantryForm,
+    });
+
+    pantryFormContainer.innerHTML = "";
+    pantryFormContainer.appendChild(scan);
+  }
+
+  // --- Storage setup wizard ---
+  function showStorageSetup() {
+    pantryFormContainer.classList.remove("hidden");
+    pantryToolbar.classList.add("hidden");
+
+    const setup = createStorageSetup({
+      onComplete: () => {
+        hidePantryForm();
+        loadPantryItems();
+      },
+      onCancel: hidePantryForm,
+    });
+
+    pantryFormContainer.innerHTML = "";
+    pantryFormContainer.appendChild(setup);
+  }
+
+  function hidePantryForm() {
+    pantryFormContainer.classList.add("hidden");
+    pantryFormContainer.innerHTML = "";
+    pantryToolbar.classList.remove("hidden");
   }
 });

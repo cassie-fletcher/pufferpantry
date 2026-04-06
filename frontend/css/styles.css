@@ -1049,6 +1049,386 @@ h1 {
   text-align: center;
 }
 
+/* --- Pantry inventory --- */
+.pantry-list {
+  max-width: 900px;
+}
+
+.pantry-location-group {
+  margin-bottom: 1.5rem;
+}
+
+.pantry-location-header {
+  font-size: 1rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-primary);
+  padding-bottom: 0.4rem;
+  border-bottom: 2px solid var(--color-primary);
+  margin-bottom: 0.5rem;
+}
+
+.pantry-items {
+  display: flex;
+  flex-direction: column;
+}
+
+.pantry-item-row {
+  display: grid;
+  grid-template-columns: 2fr 1.5fr 1fr 1fr auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.9rem;
+}
+
+.pantry-item-row:last-child {
+  border-bottom: none;
+}
+
+.pantry-item-name {
+  font-weight: 500;
+}
+
+.pantry-item-category {
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+}
+
+.pantry-item-expiry {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.pantry-item-actions {
+  display: flex;
+  gap: 0.25rem;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.pantry-item-row:hover .pantry-item-actions {
+  opacity: 1;
+}
+
+.pantry-item-quantity {
+  position: relative;
+}
+
+.pantry-exact-qty {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  margin-bottom: 0.15rem;
+  display: block;
+}
+
+/* Quantity bar */
+.quantity-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.quantity-bar-segment {
+  width: 14px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--color-border);
+}
+
+.quantity-bar-label {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin-left: 0.4rem;
+  white-space: nowrap;
+}
+
+/* Quantity level picker */
+.level-picker {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  padding: 0.25rem;
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+}
+
+.level-picker-btn {
+  border: none;
+  background: none;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.level-picker-btn:hover {
+  background: var(--color-bg);
+}
+
+.level-picker-btn.active {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+/* Expiry badges */
+.expiry-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+}
+
+.expiry-danger {
+  background: var(--color-danger);
+  color: white;
+}
+
+.expiry-warning {
+  background: #f39c12;
+  color: white;
+}
+
+/* --- Pantry scan review --- */
+.pantry-scan .scan-tip {
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.scan-review-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.scan-review-header h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.scan-review-thumb-img {
+  width: 120px;
+  height: 90px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  margin-right: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.scan-review-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.scan-review-row:last-child {
+  border-bottom: none;
+}
+
+.scan-review-row input,
+.scan-review-row select {
+  padding: 0.4rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  font-family: inherit;
+}
+
+.confidence-warning {
+  grid-column: 1 / -1;
+  font-size: 0.8rem;
+  color: #e67e22;
+  padding: 0.2rem 0 0.2rem 0.5rem;
+  border-left: 3px solid #f39c12;
+}
+
+.pantry-filters {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* --- Storage area / zone grouping --- */
+.pantry-area-group {
+  margin-bottom: 2rem;
+}
+
+.pantry-area-header {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--color-text);
+  margin-bottom: 0.75rem;
+}
+
+.pantry-zone-group {
+  margin-bottom: 1rem;
+  margin-left: 0.5rem;
+}
+
+.pantry-zone-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--color-primary);
+  margin-bottom: 0.4rem;
+}
+
+.pantry-zone-header strong {
+  color: var(--color-primary);
+  font-size: 0.9rem;
+}
+
+.zone-meta {
+  font-size: 0.75rem;
+  margin-left: 0.5rem;
+}
+
+/* --- Storage setup wizard --- */
+.storage-setup .setup-zone-card {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.setup-zone-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.setup-zone-row input,
+.setup-zone-row select {
+  padding: 0.4rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  font-family: inherit;
+}
+
+.setup-zone-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.setup-cat-chip {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  user-select: none;
+}
+
+.setup-cat-chip input {
+  width: 0.8rem;
+  height: 0.8rem;
+  margin: 0;
+}
+
+.setup-cat-chip:has(input:checked) {
+  background: var(--color-primary);
+  color: white;
+  border-color: var(--color-primary);
+}
+
+/* Setup step 4: zone scan cards */
+.setup-scan-zone-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  margin-bottom: 0.5rem;
+  background: var(--color-surface);
+}
+
+.setup-scan-zone-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.setup-scan-zone-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* --- Zone scan diff badges --- */
+.scan-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  margin-right: 0.5rem;
+  white-space: nowrap;
+}
+
+.scan-new {
+  background: #27ae60;
+  color: white;
+}
+
+.scan-updated {
+  background: #2e86ab;
+  color: white;
+}
+
+.scan-unchanged {
+  background: var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.scan-removed {
+  background: var(--color-danger);
+  color: white;
+}
+
+.scan-row-removed {
+  opacity: 0.7;
+}
+
+.scan-strikethrough {
+  text-decoration: line-through;
+  color: var(--color-text-muted);
+}
+
+.scan-review-row .scan-review-removed-action {
+  padding: 0.3rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 0.8rem;
+  font-family: inherit;
+}
+
 /* Responsive: stack on narrow screens */
 @media (max-width: 600px) {
   .detail-content {
@@ -1066,5 +1446,23 @@ h1 {
 
   .shop-recipes {
     grid-column: 2 / -1;
+  }
+
+  .pantry-item-row {
+    grid-template-columns: 1fr 1fr auto;
+    gap: 0.5rem;
+  }
+
+  .pantry-item-category,
+  .pantry-item-expiry {
+    grid-column: span 1;
+  }
+
+  .scan-review-row {
+    grid-template-columns: 1fr 1fr auto;
+  }
+
+  .scan-review-row select:first-of-type {
+    grid-column: 1 / 2;
   }
 }

@@ -6,7 +6,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.database import create_tables
+from app.routers.pantry import router as pantry_router
 from app.routers.recipes import router as recipes_router
+from app.routers.storage import router as storage_router
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 PHOTOS_DIR = Path(__file__).resolve().parent.parent / "data" / "photos"
@@ -23,7 +25,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="PufferPantry", version="0.1.0", lifespan=lifespan)
 
 # API routes
+app.include_router(pantry_router, prefix="/api")
 app.include_router(recipes_router, prefix="/api")
+app.include_router(storage_router, prefix="/api")
 
 # Static assets (CSS, JS, images) served under their own paths.
 # These are mounted AFTER the API router so they don't shadow API routes.

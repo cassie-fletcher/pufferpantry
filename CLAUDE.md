@@ -84,7 +84,7 @@ script") underpins all of the above.
 
 ## TODO 
 
-- [ ] **Design ensemble extraction system.** Goal: verify all extracted recipe text via independent voting methods. Current production: `extract_recipe_from_photos` (`app/services/photo_service.py:340`) uses `claude-opus-4-6` for extraction; no cross-method verification. Decisions previously discussed (carry forward): (1) voter model must differ from primary extractor and from dev model; (2) Sonnet 4.6 preferred / Opus 4.6 fallback for voter; (3) reconcile by averaging a confidence metric (not majority-vote) so low-confidence agreement remains visible.
+- [ ] **Combine OCR methods (ROVER).** Goal: combine several independent local readings of a recipe photo into one better result, with **no LLM/API calls in the ensemble**. Reading layer exists: `app/ocr/read_image(path, method=...)` with `tesseract`, `apple_vision`, `claude` (claude built but deliberately unused). Combination not designed yet — deferred by Cassie until metrics are settled. An earlier Claude-model-voter design (Sonnet voter, confidence averaging) was considered and **rejected**; do not resurrect it from old notes.
 
 ### Code cleanup
 - [ ] "Step" is overloaded in photo_service.py — means both extraction pipeline stages and recipe cooking steps. Rename to disambiguate.

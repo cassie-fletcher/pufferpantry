@@ -24,6 +24,7 @@
 - `frontend/js/components/pantry-scan.js` — generic vs zone-aware modes, review phase, bulk save
 
 ## Not yet covered
+- `app/ocr/` — read_image + per-method readers (tesseract, vision, claude), ~1,500 lines, agent-written 2026-07-29, untraced
 - `app/config.py` — app configuration/settings
 - `app/database.py` — database setup
 - `app/services/nutrition_service.py` — USDA nutrition lookup

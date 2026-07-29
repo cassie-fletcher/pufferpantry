@@ -1,17 +1,36 @@
-"""Metric-testing harness for OCR scoring (plumbing only).
+"""OCR scoring metrics.
 
-Loads a synthetic case (clean.txt, flawed.txt, manifest.json) produced by
-inject_errors.py, runs every registered metric against both clean-vs-clean
-and clean-vs-flawed, and reports whether each metric correctly ranks the
-flawed text below the clean text.
+Two layers:
 
-Real metrics are added later via @register_metric. The two metrics defined
-here are placeholders that only prove the harness runs end-to-end.
+1. STRING metrics (the original harness): (reference, candidate) -> [0, 1],
+   validated against synthetic cases (clean.txt / flawed.txt / manifest.json)
+   from inject_errors.py. A metric that fails to rank a known-flawed text
+   below clean gets discarded — that rule predates everything else here.
+
+2. SCHEMA metrics (added 2026-07-29, slate discussed with and approved by
+   Cassie): score one method's parsed reading against the ground-truth YAML.
+     A  ingredient field scores (pair GT<->parsed, then per-field accuracy)
+     B  per-step word error rate, steps aligned by printed number
+     B' numeric-token recall inside steps (a temp/time/amount wrong is worse
+        than a prose typo — semantic-load asymmetry)
+     C  raw-text word recall/precision (engine coverage, pre-parse)
+     D  title similarity + servings (parsed-field extraction, NOT raw text —
+        a method can ace C and still fail D if its parser picks a wrong line)
+
+   Several v0 choices inside the schema metrics are explicitly marked
+   "DECISION (v0)" and await Cassie's ratification. Do not silently change
+   them; do not treat them as settled.
+
+CLI:
+  score_metrics.py CASE_DIR | --all      validate string metrics on cases
+  score_metrics.py --method NAME        score a reader against ground truth
 """
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
+import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -36,7 +55,8 @@ def register_metric(name: str) -> Callable[[MetricFn], MetricFn]:
 
 
 # ---------------------------------------------------------------------------
-# Placeholder metrics (DO NOT expand — real metrics come later with Cassie).
+# String metrics (layer 1). Used both directly (metric C) and as the
+# validation harness for everything else.
 # ---------------------------------------------------------------------------
 
 @register_metric("char_recall")
@@ -60,6 +80,317 @@ def word_recall(reference: str, candidate: str) -> float:
     cand = Counter(candidate.split())
     shared = sum((ref & cand).values())
     return shared / sum(ref.values())
+
+
+@register_metric("word_precision")
+def word_precision(reference: str, candidate: str) -> float:
+    """Multiset word-level precision: shared words / words in candidate.
+
+    Complement to word_recall for metric C: recall catches omission (engine
+    missed page content), precision catches hallucination (engine emitted
+    text that is not on the page).
+    """
+    cand_tokens = candidate.split()
+    if not cand_tokens:
+        return 1.0 if not reference.split() else 0.0
+    ref = Counter(reference.split())
+    cand = Counter(cand_tokens)
+    shared = sum((ref & cand).values())
+    return shared / sum(cand.values())
+
+
+# ---------------------------------------------------------------------------
+# Schema metrics (layer 2): shared text helpers.
+# ---------------------------------------------------------------------------
+
+_UNICODE_FRACTIONS = {
+    "¼": 0.25, "½": 0.5, "¾": 0.75,
+    "⅓": 1 / 3, "⅔": 2 / 3,
+    "⅛": 0.125, "⅜": 0.375, "⅝": 0.625, "⅞": 0.875,
+}
+
+# Numbers as they appear in recipes: "2", "0.5", "1/2", "425", plus an
+# optional degree suffix ("425°F"), plus bare unicode fraction glyphs.
+# DECISION (v0): times like "2 hours and 45 minutes" contribute their bare
+# numbers ("2", "45"); no attempt to parse durations as durations.
+_NUMERIC_TOKEN_RE = re.compile(r"\d+(?:[./]\d+)?(?:°[A-Za-z])?|[¼½¾⅓⅔⅛⅜⅝⅞]")
+
+
+def to_decimal(text: str | None) -> float | None:
+    """Parse a printed quantity to a decimal, or None if non-numeric.
+
+    Handles: "2", "0.5", ".5", "1/2", "1 1/2", "½", "1½", "1 ½".
+    This is the canonicalization the ground-truth header prescribes: GT stores
+    decimals; everything else is normalized to decimals before comparing.
+    """
+    if not text:
+        return None
+    s = text.strip()
+    total = 0.0
+    seen = False
+    for glyph, val in _UNICODE_FRACTIONS.items():
+        if glyph in s:
+            total += val
+            s = s.replace(glyph, " ")
+            seen = True
+    for part in s.split():
+        if re.fullmatch(r"\d+/\d+", part):
+            num, den = part.split("/")
+            if den == "0":
+                return None
+            total += int(num) / int(den)
+            seen = True
+        elif re.fullmatch(r"\d*\.\d+|\d+\.?", part):
+            total += float(part)
+            seen = True
+        else:
+            return None  # non-numeric content ("to taste", "1 large") — not a quantity
+    return total if seen else None
+
+
+def _norm_text(s: str) -> str:
+    """Lowercase, collapse whitespace, strip edge punctuation per token.
+
+    DECISION (v0): this is the entire canonicalization for word comparison.
+    No unit-synonym folding (tbsp != tablespoon), no plural stripping
+    (cup != cups — the page's plurality is signal; see the wine-entry fix).
+    """
+    tokens = (re.sub(r"^\W+|\W+$", "", t) for t in s.lower().split())
+    return " ".join(t for t in tokens if t)
+
+
+def _sim(a: str, b: str) -> float:
+    """Similarity in [0,1] between two short normalized strings."""
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+def numeric_tokens(text: str) -> Counter[str]:
+    """Multiset of numeric tokens in `text` (see _NUMERIC_TOKEN_RE)."""
+    return Counter(_NUMERIC_TOKEN_RE.findall(text))
+
+
+def split_numbered_steps(instructions: str | None) -> dict[int, str]:
+    """Split an instructions blob into {printed_number: step_text}.
+
+    Accepts both "1. text" and "1.) text" markers at line starts. Printed
+    numbers are preserved as-is — a method that drops a step number should
+    show a hole here, not a silently renumbered list.
+    """
+    if not instructions:
+        return {}
+    parts = re.split(r"(?m)^\s*(\d+)[.)]+\s*", instructions)
+    # parts = [preamble, num, text, num, text, ...]
+    steps: dict[int, str] = {}
+    for i in range(1, len(parts) - 1, 2):
+        steps[int(parts[i])] = parts[i + 1].strip()
+    return steps
+
+
+def wer(reference: str, hypothesis: str) -> float:
+    """Word error rate: word-level edit distance / reference length.
+
+    0.0 = perfect. Can exceed 1.0 when the hypothesis is much longer than
+    the reference. Plain O(n*m) DP — recipe steps are short.
+    """
+    ref = _norm_text(reference).split()
+    hyp = _norm_text(hypothesis).split()
+    if not ref:
+        return 0.0 if not hyp else float(len(hyp))
+    prev = list(range(len(hyp) + 1))
+    for i, rw in enumerate(ref, 1):
+        curr = [i] + [0] * len(hyp)
+        for j, hw in enumerate(hyp, 1):
+            cost = 0 if rw == hw else 1
+            curr[j] = min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
+        prev = curr
+    return prev[-1] / len(ref)
+
+
+# ---------------------------------------------------------------------------
+# Metric A: ingredient field scores.
+# ---------------------------------------------------------------------------
+
+# DECISION (v0): a GT ingredient and a parsed ingredient are paired greedily
+# by name similarity, best pairs first, one-to-one, with this floor. The
+# similarity is _sim() on normalized strings, boosted to at least 0.9 when
+# every token of the GT item appears in the parsed name — so GT item "garlic"
+# pairs with parsed name "garlic cloves, finely chopped or grated, ..." even
+# though the raw ratio is low. The boost encodes one side of the unresolved
+# GT<->schema mapping question (whether descriptors belong in the name);
+# scoring item_sim separately keeps the other side visible.
+PAIR_THRESHOLD = 0.55
+
+
+class IngredientScore(TypedDict):
+    recall: float          # GT ingredients that found a partner / all GT
+    precision: float       # parsed ingredients that found a partner / all parsed
+    quantity_acc: float    # matched pairs with equal decimal quantity
+    unit_acc: float        # matched pairs with equal normalized unit
+    item_sim: float        # mean name similarity over matched pairs
+    n_gt: int
+    n_parsed: int
+    n_matched: int
+
+
+def _ing_name_sim(gt_item: str, parsed_name: str) -> float:
+    a, b = _norm_text(gt_item), _norm_text(parsed_name)
+    score = _sim(a, b)
+    gt_tokens = set(a.split())
+    if gt_tokens and gt_tokens <= set(b.split()):
+        score = max(score, 0.9)
+    return score
+
+
+def match_ingredients(
+    gt_ings: list[dict], parsed_ings: list[dict]
+) -> list[tuple[int, int, float]]:
+    """Greedy one-to-one pairing: (gt_index, parsed_index, similarity)."""
+    candidates = [
+        (i, j, _ing_name_sim(g.get("item") or "", p.get("name") or ""))
+        for i, g in enumerate(gt_ings)
+        for j, p in enumerate(parsed_ings)
+    ]
+    candidates.sort(key=lambda t: (-t[2], t[0], t[1]))  # deterministic
+    used_gt: set[int] = set()
+    used_parsed: set[int] = set()
+    pairs: list[tuple[int, int, float]] = []
+    for i, j, s in candidates:
+        if s < PAIR_THRESHOLD or i in used_gt or j in used_parsed:
+            continue
+        pairs.append((i, j, s))
+        used_gt.add(i)
+        used_parsed.add(j)
+    return pairs
+
+
+def score_ingredients(gt_ings: list[dict], parsed_ings: list[dict]) -> IngredientScore:
+    pairs = match_ingredients(gt_ings, parsed_ings)
+    q_ok = u_ok = q_n = u_n = 0
+    sims: list[float] = []
+    for i, j, s in pairs:
+        gt, p = gt_ings[i], parsed_ings[j]
+        sims.append(s)
+        gt_q = to_decimal(gt.get("quantity"))
+        if gt_q is not None:  # GT non-numeric ("to taste") pairs are skipped
+            q_n += 1
+            p_q = to_decimal(p.get("amount"))
+            if p_q is not None and abs(p_q - gt_q) < 1e-9:
+                q_ok += 1
+        gt_u = _norm_text(gt.get("unit") or "")
+        if gt_u:
+            u_n += 1
+            if _norm_text(p.get("unit") or "") == gt_u:
+                u_ok += 1
+    return IngredientScore(
+        recall=len(pairs) / len(gt_ings) if gt_ings else 1.0,
+        precision=len(pairs) / len(parsed_ings) if parsed_ings else 1.0,
+        quantity_acc=q_ok / q_n if q_n else 1.0,
+        unit_acc=u_ok / u_n if u_n else 1.0,
+        item_sim=sum(sims) / len(sims) if sims else 0.0,
+        n_gt=len(gt_ings),
+        n_parsed=len(parsed_ings),
+        n_matched=len(pairs),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Metrics B and B': step fidelity.
+# ---------------------------------------------------------------------------
+
+class StepScore(TypedDict):
+    mean_wer: float          # over steps aligned by printed number (B)
+    numeric_recall: float    # GT numeric tokens recovered, aligned steps (B')
+    n_gt_steps: int
+    n_parsed_steps: int
+    n_aligned: int
+    missing_numbers: list[int]  # GT step numbers absent from the parse
+
+
+def score_steps(gt_steps: list[dict], instructions: str | None) -> StepScore:
+    parsed = split_numbered_steps(instructions)
+    wers: list[float] = []
+    num_found = num_total = 0
+    missing: list[int] = []
+    for step in gt_steps:
+        n, gt_text = int(step["number"]), step["text"]
+        if n not in parsed:
+            missing.append(n)
+            continue
+        wers.append(wer(gt_text, parsed[n]))
+        gt_nums = numeric_tokens(gt_text)
+        num_total += sum(gt_nums.values())
+        num_found += sum((gt_nums & numeric_tokens(parsed[n])).values())
+    return StepScore(
+        mean_wer=sum(wers) / len(wers) if wers else 1.0,
+        numeric_recall=num_found / num_total if num_total else 1.0,
+        n_gt_steps=len(gt_steps),
+        n_parsed_steps=len(parsed),
+        n_aligned=len(wers),
+        missing_numbers=missing,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Metric C: raw-text coverage.  Metric D: parsed scalars.
+# ---------------------------------------------------------------------------
+
+class CoverageScore(TypedDict):
+    word_recall: float
+    word_precision: float
+
+
+def score_raw_coverage(gt_flat_text: str, raw_text: str | None) -> CoverageScore:
+    ref, cand = _norm_text(gt_flat_text), _norm_text(raw_text or "")
+    return CoverageScore(
+        word_recall=word_recall(ref, cand),
+        word_precision=word_precision(ref, cand),
+    )
+
+
+class ScalarScore(TypedDict):
+    title_sim: float
+    servings_ok: bool | None   # None when GT has no parseable serves range
+
+
+def score_scalars(gt: dict, title: str, servings: int | None) -> ScalarScore:
+    gt_title = _norm_text(gt.get("recipe_title") or "")
+    # DECISION (v0): GT serves is freeform ("4-6"); parsed servings counts as
+    # correct if it falls within the GT range (single value = exact match).
+    serves_ints = [int(x) for x in re.findall(r"\d+", gt.get("cook_info", {}).get("serves", ""))]
+    if not serves_ints:
+        ok = None
+    elif servings is None:
+        ok = False
+    else:
+        ok = min(serves_ints) <= servings <= max(serves_ints)
+    return ScalarScore(
+        title_sim=_sim(gt_title, _norm_text(title or "")),
+        servings_ok=ok,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Full scorecard for one reading.
+# ---------------------------------------------------------------------------
+
+def score_reading(
+    gt: dict,
+    *,
+    ingredients: list[dict],
+    instructions: str | None,
+    title: str,
+    servings: int | None,
+    raw_text: str | None,
+    gt_flat_text: str,
+) -> dict:
+    """Score one parsed reading against ground truth. Pure data in, dict out —
+    no dependency on the app package or any OCR engine."""
+    return {
+        "A_ingredients": score_ingredients(gt["ingredients"], ingredients),
+        "B_steps": score_steps(gt["steps"], instructions),
+        "C_coverage": score_raw_coverage(gt_flat_text, raw_text),
+        "D_scalars": score_scalars(gt, title, servings),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +488,53 @@ def _iter_case_dirs(root: Path) -> list[Path]:
     return sorted(p for p in root.iterdir() if p.is_dir())
 
 
+def _print_scorecard(method: str, report: dict) -> None:
+    a, b, c, d = (report["A_ingredients"], report["B_steps"],
+                  report["C_coverage"], report["D_scalars"])
+    print(f"=== {method} ===")
+    print(f"A  ingredients   recall {a['recall']:.2f}  precision {a['precision']:.2f}  "
+          f"({a['n_matched']}/{a['n_gt']} GT matched, {a['n_parsed']} parsed)")
+    print(f"   fields        quantity {a['quantity_acc']:.2f}  unit {a['unit_acc']:.2f}  "
+          f"item_sim {a['item_sim']:.2f}")
+    print(f"B  steps         mean WER {b['mean_wer']:.3f}  "
+          f"({b['n_aligned']}/{b['n_gt_steps']} aligned"
+          + (f", missing {b['missing_numbers']}" if b["missing_numbers"] else "") + ")")
+    print(f"B' step numbers  numeric recall {b['numeric_recall']:.2f}")
+    print(f"C  raw coverage  word recall {c['word_recall']:.2f}  "
+          f"precision {c['word_precision']:.2f}")
+    servings = {True: "ok", False: "WRONG", None: "n/a"}[d["servings_ok"]]
+    print(f"D  scalars       title_sim {d['title_sim']:.2f}  servings {servings}")
+    print()
+
+
+def _score_method(method: str) -> int:
+    """Read the reference photo with `method` and print its scorecard."""
+    import yaml
+
+    repo = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(repo))
+    from app.ocr import read_image  # deferred: needs repo root on sys.path
+    from inject_errors import render_ground_truth
+
+    gt_path = Path(__file__).parent / "ground_truth" / "20260404_204704_04f01b.yaml"
+    gt = yaml.safe_load(gt_path.read_text(encoding="utf-8"))
+    photo = repo / "data" / "photos" / gt["photo"]
+
+    reading = read_image(photo, method=method)
+    s = reading.schema
+    report = score_reading(
+        gt,
+        ingredients=[i.model_dump() for i in s.ingredients],
+        instructions=s.instructions,
+        title=s.title,
+        servings=s.servings,
+        raw_text=reading.raw_text,
+        gt_flat_text=render_ground_truth(str(gt_path), layout="flat").text,
+    )
+    _print_scorecard(method, report)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Score synthetic OCR cases.")
     group = parser.add_mutually_exclusive_group(required=True)
@@ -165,7 +543,14 @@ def main(argv: list[str] | None = None) -> int:
         "--all", action="store_true",
         help="score every subdir of scripts/synthetic_cases/",
     )
+    group.add_argument(
+        "--method",
+        help="score a reader (tesseract|apple_vision|claude) against ground truth",
+    )
     args = parser.parse_args(argv)
+
+    if args.method:
+        return _score_method(args.method)
 
     if args.all:
         root = Path(__file__).parent / "synthetic_cases"

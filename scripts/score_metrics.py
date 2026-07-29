@@ -8,14 +8,15 @@ Two layers:
    below clean gets discarded — that rule predates everything else here.
 
 2. SCHEMA metrics (added 2026-07-29, slate discussed with and approved by
-   Cassie): score one method's parsed reading against the ground-truth YAML.
-     A  ingredient field scores (pair GT<->parsed, then per-field accuracy)
-     B  per-step word error rate, steps aligned by printed number
-     B' numeric-token recall inside steps (a temp/time/amount wrong is worse
-        than a prose typo — semantic-load asymmetry)
-     C  raw-text word recall/precision (engine coverage, pre-parse)
-     D  title similarity + servings (parsed-field extraction, NOT raw text —
-        a method can ace C and still fail D if its parser picks a wrong line)
+   Cassie; originally lettered A/B/B'/C/D in that discussion):
+     ingredients    field scores (pair GT<->parsed, then per-field accuracy)
+     step_text      per-step word error rate, aligned by printed number
+     step_numerics  numeric-token recall inside steps (a temp/time/amount
+                    wrong is worse than a prose typo)
+     page_coverage  raw-text word recall/precision (engine coverage, pre-parse)
+     parsed_scalars title similarity + servings (parsed fields, NOT raw text —
+                    a method can ace coverage and still fail here if its
+                    parser picks a wrong line)
 
    Several v0 choices inside the schema metrics are explicitly marked
    "DECISION (v0)" and await Cassie's ratification. Do not silently change
@@ -386,10 +387,10 @@ def score_reading(
     """Score one parsed reading against ground truth. Pure data in, dict out —
     no dependency on the app package or any OCR engine."""
     return {
-        "A_ingredients": score_ingredients(gt["ingredients"], ingredients),
-        "B_steps": score_steps(gt["steps"], instructions),
-        "C_coverage": score_raw_coverage(gt_flat_text, raw_text),
-        "D_scalars": score_scalars(gt, title, servings),
+        "ingredients": score_ingredients(gt["ingredients"], ingredients),
+        "steps": score_steps(gt["steps"], instructions),
+        "coverage": score_raw_coverage(gt_flat_text, raw_text),
+        "scalars": score_scalars(gt, title, servings),
     }
 
 
@@ -489,21 +490,22 @@ def _iter_case_dirs(root: Path) -> list[Path]:
 
 
 def _print_scorecard(method: str, report: dict) -> None:
-    a, b, c, d = (report["A_ingredients"], report["B_steps"],
-                  report["C_coverage"], report["D_scalars"])
+    a, b, c, d = (report["ingredients"], report["steps"],
+                  report["coverage"], report["scalars"])
     print(f"=== {method} ===")
-    print(f"A  ingredients   recall {a['recall']:.2f}  precision {a['precision']:.2f}  "
+    print(f"ingredient recovery   recall {a['recall']:.2f}  precision {a['precision']:.2f}  "
           f"({a['n_matched']}/{a['n_gt']} GT matched, {a['n_parsed']} parsed)")
-    print(f"   fields        quantity {a['quantity_acc']:.2f}  unit {a['unit_acc']:.2f}  "
+    print(f"ingredient fields     quantity {a['quantity_acc']:.2f}  unit {a['unit_acc']:.2f}  "
           f"item_sim {a['item_sim']:.2f}")
-    print(f"B  steps         mean WER {b['mean_wer']:.3f}  "
+    print(f"step text             mean WER {b['mean_wer']:.3f}  "
           f"({b['n_aligned']}/{b['n_gt_steps']} aligned"
           + (f", missing {b['missing_numbers']}" if b["missing_numbers"] else "") + ")")
-    print(f"B' step numbers  numeric recall {b['numeric_recall']:.2f}")
-    print(f"C  raw coverage  word recall {c['word_recall']:.2f}  "
-          f"precision {c['word_precision']:.2f}")
+    print(f"step numerics         recall {b['numeric_recall']:.2f}   "
+          "(amounts/temps/times inside steps)")
+    print(f"page coverage         word recall {c['word_recall']:.2f}  "
+          f"precision {c['word_precision']:.2f}   (raw text, pre-parse)")
     servings = {True: "ok", False: "WRONG", None: "n/a"}[d["servings_ok"]]
-    print(f"D  scalars       title_sim {d['title_sim']:.2f}  servings {servings}")
+    print(f"title & servings      title_sim {d['title_sim']:.2f}  servings {servings}")
     print()
 
 

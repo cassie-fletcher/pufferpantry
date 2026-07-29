@@ -202,7 +202,7 @@ def test_to_decimal_forms() -> None:
 
 def test_clean_parse_scores_perfect() -> None:
     r = _score(CLEAN_PARSE)
-    a, b, d = r["A_ingredients"], r["B_steps"], r["D_scalars"]
+    a, b, d = r["ingredients"], r["steps"], r["scalars"]
     assert a["recall"] == a["precision"] == 1.0
     assert a["quantity_acc"] == a["unit_acc"] == 1.0
     assert b["mean_wer"] == 0.0 and b["numeric_recall"] == 1.0
@@ -234,19 +234,19 @@ def test_hallucinated_ingredient_sinks_precision_not_recall() -> None:
 def test_word_misread_sinks_wer() -> None:
     bad = dict(CLEAN_PARSE,
                instructions=CLEAN_PARSE["instructions"].replace("Preheat", "Preheal"))
-    assert _score(bad)["B_steps"]["mean_wer"] > 0.0
+    assert _score(bad)["steps"]["mean_wer"] > 0.0
 
 
 def test_numeric_corruption_sinks_numeric_recall() -> None:
     bad = dict(CLEAN_PARSE,
                instructions=CLEAN_PARSE["instructions"].replace("200°F", "200°R"))
-    r = _score(bad)["B_steps"]
+    r = _score(bad)["steps"]
     assert r["numeric_recall"] < 1.0
 
 
 def test_missing_step_number_reported_as_hole() -> None:
     bad = dict(CLEAN_PARSE, instructions="1. Preheat the oven to 200°F.")
-    r = _score(bad)["B_steps"]
+    r = _score(bad)["steps"]
     assert r["missing_numbers"] == [2]
     assert r["n_aligned"] == 1
 

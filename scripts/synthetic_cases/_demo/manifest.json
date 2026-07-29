@@ -1,0 +1,14 @@
+[
+  {
+    "type": "char_misread",
+    "offset": 47,
+    "original": "F",
+    "replacement": "R"
+  },
+  {
+    "type": "missing_content",
+    "start_offset": 119,
+    "length": 36,
+    "deleted_content": "Let rest 10 minutes before carving.\n"
+  }
+]

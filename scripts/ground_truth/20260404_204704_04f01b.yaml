@@ -1,0 +1,201 @@
+# Ground truth for Sunday Chicken (photo 20260404_204704_04f01b.jpg).
+#
+# Fill in by reading the photo, not from memory. The point is to capture
+# exactly what's on the page — including typos, weird spellings, etc.
+#
+# Schema notes:
+#   - quantity: **decimal form** — what should end up in the SQL database after
+#     extraction + parsing (e.g. "1 1/2" on the page → 1.5 here). Empty string
+#     or omit for non-numeric ("to taste", no quantity printed). The scorer
+#     normalizes OCR/Claude outputs (which will see "1½" or "1 1/2" on the
+#     page) to decimals before comparing against this ground truth.
+#   - unit: freeform. Use whatever's printed ("tablespoon", "cups", "cloves",
+#     "sprig", null if none).
+#   - item: the core ingredient name ("garlic", "orzo"). Keep descriptors
+#     ("low-sodium", "fresh") in `prep` or `notes`.
+#   - prep: free-text for "finely chopped", "quartered", "cut into 2-tablespoon
+#     slices", etc. Optional.
+#   - notes: anything else (e.g. "plus 1 thyme sprig"). Optional.
+#
+# Open questions to think about as you fill this in — we'll discuss after:
+#   Q1 — Compound ingredients: the first ingredient is "3 garlic cloves, finely
+#        chopped or grated, plus 3 whole cloves." One entry (with "plus 3 whole
+#        cloves" in notes) or two entries? I defaulted to one below — change it
+#        if you think two is better.
+#   Q2 — "Fine pink Himalayan salt and freshly ground pepper" has no quantity.
+#        One entry with quantity "to taste"? Two entries (salt, pepper)?
+#   Q3 — Do we capture the optional "Chopped fresh basil and/or parsley, for
+#        serving (optional)" as one entry or two?
+
+photo: 20260404_204704_04f01b.jpg
+recipe_title: Slow-Roasted Sunday Chicken
+
+headnote: |
+  If ever there were a dish worthy of a Sunday dinner, this is it. Nothing is
+  cozier than the smell of a slow-roasting chicken. No matter how old I get, it
+  always brings me back to when my mom would roast one on Sundays (in addition
+  to baking her chocolate chip cookies). She served it up with a buttery side
+  dish, usually potatoes but sometimes rice. And bread. Always bread. So that
+  got me thinking—what's the only thing that could possibly make a Sunday
+  chicken better? A side of buttery, lemony orzo cooked directly alongside,
+  making this hearty dinner a complete one-and-done. Yes, it takes a few hours,
+  but that time is almost completely hands-off, nothing fancy, and the outcome
+  is always stunning . . . and, of course, delicious. Serve it Gerard-family
+  style, straight from the pot, for a perfect dinner that impresses and
+  satisfies everyone. Don't worry, no one needs to know how stinkin' easy it
+  was to make.
+
+ingredients:
+  # ── EXAMPLE (delete or edit) ──
+  - quantity: "6"
+    unit: "cloves"
+    item: "garlic"
+    prep: "3 cloves finely chopped or grated + 3 whole cloves"
+    notes: ""
+
+  # ── Fill in the rest below ──
+  # Copy the schema above. Order them as they appear on the page.
+  # Leave the YAML key blank (e.g. `unit:`) if a field doesn't apply.
+
+  - quantity: "1"
+    unit: "tablespoon"
+    item: "thyme"
+    prep: ""
+    notes: "fresh, plus 1 sprig"
+
+  - quantity: "2"
+    unit: "teaspoons"
+    item: "rosemary"
+    prep: "chopped"
+    notes: "fresh, plus 1 sprig"
+
+  - quantity: "1"
+    unit: "teaspoon"
+    item: "smoked paprika"
+    prep: ""
+    notes: ""
+
+  - quantity: "2"
+    unit: ""
+    item: "lemons"
+    prep: "1 lemon zested and cut into wedges, 1 lemon cut into slices"
+    notes: ""
+
+  - quantity: "1"
+    unit: "tablespoon"
+    item: "extra-virgin olive oil"
+    prep: ""
+    notes: ""
+
+  - quantity: ""
+    unit: ""
+    item: "salt"
+    prep: ""
+    notes: "Fine pink Himalayan, to taste"
+
+  - quantity: ""
+    unit: ""
+    item: "pepper"
+    prep: ""
+    notes: "freshly ground, to taste"
+
+  - quantity: "1"
+    unit: "4-pound"
+    item: "chicken"
+    prep: ""
+    notes: ""
+
+  - quantity: "1"
+    unit: ""
+    item: "yellow onion"
+    prep: "quartered"
+    notes: "recipe calls for large onion"
+
+  - quantity: "2"
+    unit: "tablespoons"
+    item: "balsamic vinegar"
+    prep: ""
+    notes: ""
+
+  - quantity: "3"
+    unit: "tablespoons"
+    item: "salted butter"
+    prep: "cut into 1/2 tablespoon slices"
+    notes: ""
+
+  - quantity: "1.5"
+    unit: "cups"
+    item: "orzo"
+    prep: ""
+    notes: ""
+
+  - quantity: "2"
+    unit: "cups"
+    item: "baby spinach"
+    prep: ""
+    notes: ""
+
+  - quantity: "0.5"
+    unit: "cups"
+    item: "dry white wine"
+    prep: ""
+    notes: "such as pinot grigio or Sauvignon Blanc"
+
+  - quantity: "2"
+    unit: "cups"
+    item: "chicken broth"
+    prep: ""
+    notes: "low-sodium"
+
+  - quantity: "1"
+    unit: "tablespoon"
+    item: "dill"
+    prep: ""
+    notes: "fresh, plus more for serving"
+
+  - quantity: ""
+    unit: ""
+    item: "basil and/or parsley"
+    prep: "chopped"
+    notes: "fresh, for serving"
+
+
+# ── Cook times / temperatures (optional — not used for ingredient cross-check,
+#    but useful for monitoring OCR health as we discussed) ──
+cook_info:
+  prep_time: "15 minutes"        # e.g. "15 minutes"
+  cook_time: "3 hours"        # e.g. "3 hours"
+  total_time: "3 hours and 15 minutes"       # e.g. "3 hours 15 minutes"
+  oven_temp: "200°F"        # e.g. "200°F" — may appear multiple times; pick the main one
+  serves: "4-6"           # e.g. "4"
+
+# ── Recipe steps ──
+# Transcribe each numbered step as it appears on the page. Full text is fine —
+# quantities/times/temperatures embedded in step prose (e.g. "2 tablespoons
+# of the butter", "roast for 2 hours and 45 minutes") stay inline, we don't
+# need to pull them out separately.
+steps:
+  - number: 1
+    text: "Preheat the oven to 200°F"
+
+  - number: 2
+    text: "In a small bowl, combine the chopped garlic, thyme leaves, chopped rosemary, paprika, and 2 teaspoons of lemon zest.  Ad the olic oil and a generous pinch of salt and pepper and stir to combine.  Rub the seasoned oil all over the chicken and under the skin to season the breast.  Stuff 2 onion quarters into the cavity of the chicken."
+
+  - number: 3
+    text: "Place the chicken, breast-side up, in a large Dutch oven or oven-safe pot with a lid.  Cut 1 lemon into wedges.  Scatter the lemon wedges, the remaining 2 onion quarters, the whole garlic cloces, and the thyme and rosemary sprigs around the chicken.  Drizzle the balsamic vinegar over the chicken breasts,t hen scatter 2 tablespoons of the butter over them. "
+
+  - number: 4
+    text: "Cover the put and roast the chicken for 2 hours and 45 minutes to 3 hours.  Remove from the oven.  Increase the oven temperature to 425°F."
+
+  - number: 5
+    text: "Discard the lemon wedges, onion and herb sprigs.  In the pot, scatter the remaining 1 tablespoon and the orzo around the chicken, stirring until the butter is melted.  Sprinkle the spinach around the chicken.  Pour the wine and broth and season with salt.  Cut the remaining lemon into slices and add the slices to the pot."
+
+  - number: 6
+    text: "Return the pot to the oven and roast, uncovered, until the orzo is al dente and the chicken skin is golden brown, 15 to 20 minutes more.  It's okay if there is some liquid left in the pot. "
+
+  - number: 7
+    text: "Stir the dill into the orzo.  Serve the chicken straight from the pot, with additional herbs, if you like, for each place.  "
+
+# If there's a "NOTE" or sidebar after the numbered steps, capture it here.
+# Delete this section if there isn't one.
+notes_sidebar: "If you're having trouble stirring the orzo, just lift up the chicken to move it around."

@@ -155,9 +155,15 @@ ingredients:
 
   - quantity: ""
     unit: ""
-    item: "basil and/or parsley"
+    item: "basil"
     prep: "chopped"
-    notes: "fresh, for serving"
+    notes: "fresh, for serving (optional)"
+
+  - quantity: ""
+    unit: ""
+    item: "parsley"
+    prep: "chopped"
+    notes: "fresh, for serving (optional)"
 
 
 # ── Cook times / temperatures (optional — not used for ingredient cross-check,

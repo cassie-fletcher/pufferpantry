@@ -136,7 +136,7 @@ ingredients:
     notes: ""
 
   - quantity: "0.5"
-    unit: "cups"
+    unit: "cup"
     item: "dry white wine"
     prep: ""
     notes: "such as pinot grigio or Sauvignon Blanc"
@@ -179,13 +179,13 @@ steps:
     text: "Preheat the oven to 200°F"
 
   - number: 2
-    text: "In a small bowl, combine the chopped garlic, thyme leaves, chopped rosemary, paprika, and 2 teaspoons of lemon zest.  Ad the olic oil and a generous pinch of salt and pepper and stir to combine.  Rub the seasoned oil all over the chicken and under the skin to season the breast.  Stuff 2 onion quarters into the cavity of the chicken."
+    text: "In a small bowl, combine the chopped garlic, thyme leaves, chopped rosemary, paprika, and 2 teaspoons of lemon zest.  Add the olive oil and a generous pinch of salt and pepper and stir to combine.  Rub the seasoned oil all over the chicken and under the skin to season the breast.  Stuff 2 onion quarters into the cavity of the chicken."
 
   - number: 3
-    text: "Place the chicken, breast-side up, in a large Dutch oven or oven-safe pot with a lid.  Cut 1 lemon into wedges.  Scatter the lemon wedges, the remaining 2 onion quarters, the whole garlic cloces, and the thyme and rosemary sprigs around the chicken.  Drizzle the balsamic vinegar over the chicken breasts,t hen scatter 2 tablespoons of the butter over them. "
+    text: "Place the chicken, breast-side up, in a large Dutch oven or oven-safe pot with a lid.  Cut 1 lemon into wedges.  Scatter the lemon wedges, the remaining 2 onion quarters, the whole garlic cloves, and the thyme and rosemary sprigs around the chicken.  Drizzle the balsamic vinegar over the chicken breasts, then scatter 2 tablespoons of the butter over them. "
 
   - number: 4
-    text: "Cover the put and roast the chicken for 2 hours and 45 minutes to 3 hours.  Remove from the oven.  Increase the oven temperature to 425°F."
+    text: "Cover the pot and roast the chicken for 2 hours and 45 minutes to 3 hours.  Remove from the oven.  Increase the oven temperature to 425°F."
 
   - number: 5
     text: "Discard the lemon wedges, onion and herb sprigs.  In the pot, scatter the remaining 1 tablespoon and the orzo around the chicken, stirring until the butter is melted.  Sprinkle the spinach around the chicken.  Pour the wine and broth and season with salt.  Cut the remaining lemon into slices and add the slices to the pot."

@@ -7,3 +7,6 @@ __pycache__/
 *.egg-info/
 .DS_Store
 .claude/
+
+# compiled by app/ocr/swift/build.sh — architecture-specific, rebuild locally
+app/ocr/swift/bin/

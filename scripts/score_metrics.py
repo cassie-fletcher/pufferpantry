@@ -395,6 +395,83 @@ def score_reading(
 
 
 # ---------------------------------------------------------------------------
+# Ground-truth checking (--check-gt): structural lint + ingredient-name
+# cross-check via parse-ingredients.
+#
+# parse-ingredients is used for NAMES ONLY (Cassie, 2026-07-29): measured on
+# our own lines, it misparses bare fractions ("1/2 cup" -> qty 1.5) and
+# raises IndexError on quantity-less lines. Its quantity/unit output must
+# never be consumed. Name extraction is decent and is all we take.
+# ---------------------------------------------------------------------------
+
+_INGREDIENT_FIELDS = ("quantity", "unit", "item", "prep", "notes")
+
+
+def lint_ground_truth(gt: dict) -> list[str]:
+    """Structural problems in a GT dict. Empty list = clean."""
+    problems: list[str] = []
+    for key in ("recipe_title", "ingredients", "steps"):
+        if not gt.get(key):
+            problems.append(f"missing or empty top-level key: {key}")
+    for n, ing in enumerate(gt.get("ingredients") or []):
+        missing = [f for f in _INGREDIENT_FIELDS if f not in ing]
+        if missing:
+            problems.append(f"ingredient[{n}]: missing fields {missing}")
+        if not (ing.get("item") or "").strip():
+            problems.append(f"ingredient[{n}]: empty item")
+        q = ing.get("quantity", "")
+        if q and to_decimal(q) is None:
+            problems.append(
+                f"ingredient[{n}] ({ing.get('item')!r}): quantity {q!r} is neither "
+                "empty nor decimal-parseable"
+            )
+    numbers = [int(s["number"]) for s in gt.get("steps") or [] if "number" in s]
+    expected = list(range(1, len(numbers) + 1))
+    if numbers != expected:
+        problems.append(f"step numbers {numbers} != consecutive {expected}")
+    items = [_norm_text(i.get("item") or "") for i in gt.get("ingredients") or []]
+    for dup in {i for i in items if items.count(i) > 1}:
+        problems.append(f"duplicate ingredient item: {dup!r}")
+    return problems
+
+
+def check_ingredient_names(gt: dict) -> list[str]:
+    """Cross-check each GT item against parse-ingredients' name extraction.
+
+    Reconstructs an approximation of the printed line from the GT fields,
+    parses it, and flags entries where the library's extracted name and the
+    GT item don't overlap. Flags are CANDIDATES for a human to judge against
+    the photo — the library is not an authority on what the page says.
+    """
+    import contextlib
+    import io
+
+    from parse_ingredients import parse_ingredient
+
+    flags: list[str] = []
+    for n, ing in enumerate(gt.get("ingredients") or []):
+        line = " ".join(
+            p for p in (ing.get("quantity"), ing.get("unit"), ing.get("item")) if p
+        )
+        if ing.get("prep"):
+            line += f", {ing['prep']}"
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):  # silence its debug prints
+                parsed = parse_ingredient(line)
+        except Exception as exc:  # crashes on quantity-less lines, measured
+            flags.append(f"ingredient[{n}] ({ing.get('item')!r}): unparseable ({type(exc).__name__}) — skipped")
+            continue
+        gt_item, lib_name = _norm_text(ing.get("item") or ""), _norm_text(parsed.name)
+        if not lib_name:
+            flags.append(f"ingredient[{n}] ({ing.get('item')!r}): library extracted no name")
+        elif lib_name != gt_item and lib_name not in gt_item and gt_item not in lib_name:
+            flags.append(
+                f"ingredient[{n}]: GT item {ing.get('item')!r} vs library name {parsed.name!r}"
+            )
+    return flags
+
+
+# ---------------------------------------------------------------------------
 # Scorer.
 # ---------------------------------------------------------------------------
 
@@ -549,10 +626,30 @@ def main(argv: list[str] | None = None) -> int:
         "--method",
         help="score a reader (tesseract|apple_vision|claude) against ground truth",
     )
+    group.add_argument(
+        "--check-gt", nargs="?", const="", metavar="YAML",
+        help="lint a ground-truth file (default: the Sunday Chicken GT)",
+    )
     args = parser.parse_args(argv)
 
     if args.method:
         return _score_method(args.method)
+
+    if args.check_gt is not None:
+        import yaml
+
+        path = (Path(args.check_gt) if args.check_gt
+                else Path(__file__).parent / "ground_truth" / "20260404_204704_04f01b.yaml")
+        gt = yaml.safe_load(path.read_text(encoding="utf-8"))
+        problems = lint_ground_truth(gt)
+        flags = check_ingredient_names(gt)
+        print(f"structural problems ({len(problems)}):")
+        for p in problems:
+            print(f"  {p}")
+        print(f"name-check flags ({len(flags)}):")
+        for f in flags:
+            print(f"  {f}")
+        return 1 if problems else 0
 
     if args.all:
         root = Path(__file__).parent / "synthetic_cases"

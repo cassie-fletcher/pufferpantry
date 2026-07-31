@@ -48,7 +48,7 @@ import pytesseract
 from PIL import Image
 
 from app.ocr.base import Reading
-from app.ocr.xycut import xycut_text
+from app.ocr.xycut import SKEW_GATE_DEG, xycut_read
 from app.ocr.normalize import normalize_ingredients
 from app.ocr.resolve import resolve_references
 from app.schemas.recipe import IngredientCreate, PhotoExtractResult
@@ -504,6 +504,7 @@ def read(
     preprocess: bool = False,
     extra_config: str = "",
     segmentation: str = "xycut",
+    skew_gate_deg: float = SKEW_GATE_DEG,
 ) -> Reading:
     """OCR `image_path` with Tesseract and parse the result.
 
@@ -531,6 +532,11 @@ def read(
             measurably better on multi-column layouts, falls through to
             full-page psm 3 when the page has no cuttable structure.
             "none" is the plain full-page path at `psm`.
+        skew_gate_deg: (xycut path only) rotate a page level before
+            segmenting iff its measured tilt exceeds this many degrees;
+            below the gate the image is untouched (deskew measurably hurt
+            on the flat reference photo). See xycut.SKEW_GATE_DEG for the
+            measurement-based justification of the default.
 
     Raises:
         FileNotFoundError: if `image_path` does not exist.
@@ -548,10 +554,22 @@ def read(
     if segmentation not in ("xycut", "none"):
         raise ValueError(f"segmentation must be 'xycut' or 'none', got {segmentation!r}")
 
+    # Two texts per page: page_texts is the legacy raw form (raw_text field,
+    # parse input — unchanged); resolver_texts is what resolve_references
+    # sees. Contract with the resolver: BLANK LINES separate visual blocks,
+    # single newlines join lines within a block, a block's columns come
+    # left-column-first. The xycut path derives that from the cut tree's
+    # top-level horizontal cuts (assemble_block_text); the plain path's
+    # psm-3 paragraph breaks approximate it.
     page_texts: list[str] = []
+    resolver_texts: list[str] = []
     if segmentation == "xycut":
         for p in paths:
-            page_texts.append(xycut_text(Image.open(p), lang=lang))
+            page = xycut_read(
+                Image.open(p), lang=lang, skew_gate_deg=skew_gate_deg
+            )
+            page_texts.append(page.raw_text)
+            resolver_texts.append(page.block_text)
     else:
         config = f"--oem {oem} --psm {psm}"
         if extra_config:
@@ -561,6 +579,7 @@ def read(
             page_texts.append(
                 pytesseract.image_to_string(image, lang=lang, config=config)
             )
+        resolver_texts = page_texts
     raw_text = "\n\n".join(page_texts)
 
     if len(page_texts) == 1:
@@ -578,7 +597,7 @@ def read(
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         provisional = parse_text(page_texts[0], photo_filename=paths[0].name)
-    _, continuation_rel = resolve_references(provisional, page_texts[1:])
+    _, continuation_rel = resolve_references(provisional, resolver_texts[1:])
     continuation_pages = {i + 1 for i in continuation_rel}
 
     # Re-parse the main recipe from page 1 + continuation pages (the existing
@@ -593,7 +612,7 @@ def read(
     schema = parse_text(main_text, photo_filename=paths[0].name)
     referenced_texts = [
         text
-        for i, text in enumerate(page_texts)
+        for i, text in enumerate(resolver_texts)
         if i != 0 and i not in continuation_pages
     ]
     if referenced_texts:

@@ -14,6 +14,13 @@ page's own statistics, none from pixels of a particular photo.
 
 Algorithm
 ---------
+0. Skew gate: measure the page's global tilt from the psm-3 word boxes
+   (median per-line baseline angle, lines with >= MIN_SKEW_LINE_WORDS
+   words). If |angle| > the gate (SKEW_GATE_DEG), rotate the image level
+   (white fill) and redo the word pass on the rotated image; below the
+   gate the image is untouched and the pipeline is bit-identical to the
+   ungated version. Gated because deskew measurably HURT on the flat
+   reference photo (April finding).
 1. One psm-3 image_to_data pass -> word boxes.
 2. Page statistics: g_med = median same-line inter-word gap (scale for
    vertical cuts), h_med = median word height (scale for horizontal cuts).
@@ -34,7 +41,14 @@ Algorithm
    display-height blocks, OCR'd row-by-row at psm 13.
 5. If no cut qualifies anywhere, fall through to full-page psm 3 — degrade
    to baseline, never to garbage. (Verified live at k=8.)
-6. Reassembly in XY reading order; terminal texts joined with blank lines.
+6. Reassembly in XY reading order. Two texts come out (XYCutPage):
+   raw_text — every terminal joined with blank lines (legacy form, kept
+   for scoring/debugging); block_text — the resolver-facing form, where
+   blank lines sit exactly at the tree's top-level HORIZONTAL cuts (the
+   visual block boundaries) and a block's terminals are joined with
+   single newlines in tree reading order (left column first). This stops
+   a sub-recipe's ingredient column and its instruction column from
+   landing in different resolver blocks.
 
 Validation status — read before trusting
 ----------------------------------------
@@ -55,10 +69,25 @@ on them. Expect some to shift as more ground truth arrives.
 Known ceilings this does NOT fix: the eng traineddata never emits unicode
 fraction glyphs (1-1/2 arrives as "1%"), and small-caps meta lines
 ("SERVES 4 TO 6") stay unreadable.
+
+Skew measurements (2026-07-31, median per-line baseline angle, lines with
+>= 4 words):
+    chicken reference       -0.53 deg   (flat; gate must not fire — and doesn't)
+    salmon page 1 (742219)  +0.69 deg
+    salmon page 2 (0a73f4)  +0.55 deg
+All three are below the 1-degree gate: the salmon photos' problem is NOT
+global tilt. Every page shows a ~3-degree top-to-bottom curvature fan
+(top-third line angles ~+1.7, bottom-third ~-1.5) that a global rotation
+cannot remove; forcing the rotation anyway (gate 0.3) merely perturbed the
+salmon results into a different failure mode, no rescue. Salmon page 1's
+real problem is upstream of geometry: psm 3 detects only 236 words there
+(vs 560 on page 2), the undetected ingredient panel enters as attached
+ink, and the display-title row pass OCRs those full-width rows diagonally.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from statistics import median
 
@@ -80,6 +109,27 @@ DEFAULT_K = 2.0              # cut threshold; plateau [1.5, 2.5] on the
                              # reference page, fall-through observed at 8
 DEFAULT_UPSCALE_BELOW = 20.0  # upscale a terminal 3x iff its median word
                               # height (px) is below this
+
+# --- Skew gate constants (all measured 2026-07-31 on the three real pages:
+# chicken 20260404_204704_04f01b, salmon 20260405_214432_742219 and
+# 20260405_214432_0a73f4) ---
+
+MIN_SKEW_LINE_WORDS = 4   # per-line baseline fit needs >= 4 words: 3-word
+                          # lines produced +-6 deg outliers on real pages
+MIN_SKEW_LINES = 5        # fewer qualifying lines than this -> measurement
+                          # untrusted, no rotation
+SKEW_GATE_DEG = 1.0       # rotate only when |median angle| exceeds this.
+                          # Justification from the measurements: all three
+                          # real pages measure within +-0.7 deg globally,
+                          # while each page's INTERNAL line-angle spread
+                          # (curvature fan, top vs bottom third) is ~3 deg —
+                          # a global rotation below 1 deg is inside the
+                          # page's own noise and can only churn pixels. The
+                          # flat chicken reference measures -0.53 deg, so
+                          # the gate keeps it untouched (April finding:
+                          # deskew hurt on that page). A genuinely tilted
+                          # page (several degrees, e.g. a photo taken
+                          # askew) clears 1 deg with margin.
 
 
 def _ocr(img: Image.Image, psm: int, lang: str) -> str:
@@ -127,6 +177,75 @@ def get_words(img: Image.Image, lang: str = "eng") -> list[Word]:
                         d["text"][i],
                         (d["block_num"][i], d["par_num"][i], d["line_num"][i])))
     return out
+
+
+def line_skew_angles(words: list[Word],
+                     min_line_words: int = MIN_SKEW_LINE_WORDS) -> list[float]:
+    """Per-line baseline angles, degrees.
+
+    Words are grouped into psm-3 lines (block/par/line ids); each line with
+    >= min_line_words words gets a least-squares fit of word-center y over
+    word-center x. Positive angle = text slopes downhill left-to-right in
+    image coordinates (y down).
+    """
+    lines: dict[tuple, list[Word]] = {}
+    for w in words:
+        lines.setdefault(w.line_key, []).append(w)
+    angles: list[float] = []
+    for ws in lines.values():
+        if len(ws) < min_line_words:
+            continue
+        xs = [(w.x0 + w.x1) / 2 for w in ws]
+        ys = [(w.y0 + w.y1) / 2 for w in ws]
+        n = len(xs)
+        mx, my = sum(xs) / n, sum(ys) / n
+        sxx = sum((x - mx) ** 2 for x in xs)
+        if sxx == 0:
+            continue  # vertically stacked "line" — no baseline to fit
+        slope = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sxx
+        angles.append(math.degrees(math.atan(slope)))
+    return angles
+
+
+def measure_skew_deg(words: list[Word]) -> float | None:
+    """Median per-line baseline angle, or None when too few lines qualify.
+
+    The median is the page's global tilt estimate; it is deliberately robust
+    to the curvature fan real book photos show (individual lines vary by a
+    few degrees top-to-bottom around the global value).
+    """
+    angles = line_skew_angles(words)
+    if len(angles) < MIN_SKEW_LINES:
+        return None
+    return median(angles)
+
+
+def deskew(img: Image.Image, angle_deg: float) -> Image.Image:
+    """Rotate the image so a page measuring `angle_deg` comes out level.
+
+    PIL rotates counterclockwise; a positive measured angle (text downhill
+    to the right) is a clockwise page tilt, so rotating BY the measured
+    angle levels it (verified empirically: chicken rotated -3 deg measures
+    +2.9, and rotating salmon p1 by its +0.69 brought it to -0.38).
+    White fill matches the paper; expand=True keeps corners.
+    """
+    return img.rotate(angle_deg, resample=Image.BICUBIC, expand=True,
+                      fillcolor=(255, 255, 255))
+
+
+def maybe_deskew(
+    img: Image.Image, words: list[Word], gate_deg: float = SKEW_GATE_DEG
+) -> tuple[Image.Image, float | None, bool]:
+    """The gate: (image, measured angle, fired?).
+
+    Below the gate (or unmeasurable) the ORIGINAL image object is returned
+    untouched — bit-identical downstream behavior, per the April finding
+    that deskewing a flat page hurt.
+    """
+    angle = measure_skew_deg(words)
+    if angle is None or abs(angle) <= gate_deg:
+        return img, angle, False
+    return deskew(img, angle), angle, True
 
 
 def page_stats(words: list[Word]) -> tuple[float, float]:
@@ -291,18 +410,88 @@ def _y_rows(boxes: list[tuple[int, int, int, int]]) -> list[tuple[int, int, int,
     return [tuple(r) for r in sorted(rows, key=lambda r: r[1])]
 
 
-def xycut_text(img: Image.Image, *, k: float = DEFAULT_K,
+def block_nodes(tree: Node, _at_root: bool = True):
+    """The visual blocks of the page, in reading order.
+
+    Block boundaries are the tree's top-level HORIZONTAL cuts: stacked
+    h-cuts mark title / ingredients / steps / sub-recipe boundaries. One
+    wrinkle, measured on all three real pages: the ROOT cut is vertical —
+    the full-height gutter between a cookbook's narrow sidebar column and
+    its main content. That master column split also separates blocks, so
+    the root v-cut (and only the root one) is descended too; each side's
+    h-cuts then delimit its blocks. Any DEEPER vertical cut is intra-block
+    column structure (a two-column ingredient panel, a sub-recipe's
+    ingredient column beside its instruction column) and terminates the
+    descent: those columns belong to one block.
+    """
+    if tree.axis == "h" or (tree.axis == "v" and _at_root):
+        for c in tree.children:
+            yield from block_nodes(c, _at_root=False)
+    else:
+        yield tree
+
+
+def assemble_block_text(tree: Node, terminal_texts: list[str]) -> str:
+    """Resolver-facing page text from the cut tree.
+
+    `terminal_texts` is aligned with `terminals(tree)` order. Blank lines
+    appear exactly at top-level horizontal cut boundaries; within a block,
+    terminal texts are joined with single newlines in tree reading order
+    (left column first), internal blank lines dropped.
+    """
+    texts = {id(t): text for t, text in zip(terminals(tree), terminal_texts)}
+    blocks: list[str] = []
+    for b in block_nodes(tree):
+        lines: list[str] = []
+        for t in terminals(b):
+            lines.extend(
+                ln.rstrip() for ln in texts[id(t)].splitlines() if ln.strip()
+            )
+        if lines:
+            blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+@dataclass(frozen=True)
+class XYCutPage:
+    """One page's xycut output.
+
+    raw_text:   every terminal joined with blank lines — the legacy form,
+                kept for raw-text scoring and debugging.
+    block_text: resolver-facing form (see assemble_block_text). Identical
+                to raw_text's block structure only when every terminal is
+                its own visual block.
+    skew_deg:   measured global tilt (None = too few lines to measure).
+    deskewed:   whether the gate fired and the page was rotated level.
+    """
+    raw_text: str
+    block_text: str
+    skew_deg: float | None
+    deskewed: bool
+
+
+def xycut_read(img: Image.Image, *, k: float = DEFAULT_K,
                upscale_below: float = DEFAULT_UPSCALE_BELOW,
-               lang: str = "eng", use_ink: bool = True) -> str:
-    """Full pipeline: segment, OCR terminals, reassemble. Returns text."""
+               lang: str = "eng", use_ink: bool = True,
+               skew_gate_deg: float = SKEW_GATE_DEG) -> XYCutPage:
+    """Full pipeline: skew-gate, segment, OCR terminals, reassemble."""
     words = get_words(img, lang=lang)
     if not words:
-        return _ocr(img, psm=3, lang=lang)
+        text = _ocr(img, psm=3, lang=lang)
+        return XYCutPage(text, text, None, False)
+    img, skew_deg, deskewed = maybe_deskew(img, words, skew_gate_deg)
+    if deskewed:
+        words = get_words(img, lang=lang)  # boxes moved; re-detect
+        if not words:
+            text = _ocr(img, psm=3, lang=lang)
+            return XYCutPage(text, text, skew_deg, True)
     g_med, h_med = page_stats(words)
     tree = build_tree(words, k, g_med, h_med)
     if not tree.children:
-        # No qualifying cut anywhere: degrade to the full-page psm-3 baseline.
-        return _ocr(img, psm=3, lang=lang)
+        # No qualifying cut anywhere: degrade to the full-page psm-3
+        # baseline. Its paragraph breaks stand in for block boundaries.
+        text = _ocr(img, psm=3, lang=lang)
+        return XYCutPage(text, text, skew_deg, deskewed)
 
     terms = list(terminals(tree))
     boxes = [list(t.bbox()) for t in terms]
@@ -355,4 +544,18 @@ def xycut_text(img: Image.Image, *, k: float = DEFAULT_K,
         if upscale_below and h_blk < upscale_below:
             crop = _upscale(crop, 3)
         parts.append(_ocr(crop, psm=6, lang=lang))
-    return "\n\n".join(parts)
+    return XYCutPage(
+        raw_text="\n\n".join(parts),
+        block_text=assemble_block_text(tree, parts),
+        skew_deg=skew_deg,
+        deskewed=deskewed,
+    )
+
+
+def xycut_text(img: Image.Image, *, k: float = DEFAULT_K,
+               upscale_below: float = DEFAULT_UPSCALE_BELOW,
+               lang: str = "eng", use_ink: bool = True,
+               skew_gate_deg: float = SKEW_GATE_DEG) -> str:
+    """Back-compat wrapper: the raw (per-terminal) text of xycut_read."""
+    return xycut_read(img, k=k, upscale_below=upscale_below, lang=lang,
+                      use_ink=use_ink, skew_gate_deg=skew_gate_deg).raw_text

@@ -48,6 +48,7 @@ import pytesseract
 from PIL import Image
 
 from app.ocr.base import Reading
+from app.ocr.xycut import xycut_text
 from app.ocr.normalize import normalize_ingredients
 from app.schemas.recipe import IngredientCreate, PhotoExtractResult
 
@@ -501,6 +502,7 @@ def read(
     oem: int = DEFAULT_OEM,
     preprocess: bool = False,
     extra_config: str = "",
+    segmentation: str = "xycut",
 ) -> Reading:
     """OCR `image_path` with Tesseract and parse the result.
 
@@ -518,8 +520,16 @@ def read(
         lang: Tesseract language pack. Only "eng" is installed here.
         oem: OCR engine mode; 3 = Tesseract's default.
         preprocess: Opt-in Otsu binarisation. Off by default because
-            preprocessing measurably hurt accuracy on the test photo.
-        extra_config: Appended verbatim to the Tesseract config string.
+            preprocessing measurably hurt accuracy on the test photo. Only
+            applies to segmentation="none"; the xycut path manages its own
+            image handling.
+        extra_config: Appended verbatim to the Tesseract config string
+            (segmentation="none" path only).
+        segmentation: "xycut" (default) segments the page with the recursive
+            X-Y cut in app/ocr/xycut.py and OCRs each block separately —
+            measurably better on multi-column layouts, falls through to
+            full-page psm 3 when the page has no cuttable structure.
+            "none" is the plain full-page path at `psm`.
 
     Raises:
         FileNotFoundError: if `image_path` does not exist.
@@ -534,15 +544,22 @@ def read(
     for p in paths:
         if not p.is_file():
             raise FileNotFoundError(f"No such image: {p}")
-
-    config = f"--oem {oem} --psm {psm}"
-    if extra_config:
-        config = f"{config} {extra_config}"
+    if segmentation not in ("xycut", "none"):
+        raise ValueError(f"segmentation must be 'xycut' or 'none', got {segmentation!r}")
 
     page_texts: list[str] = []
-    for p in paths:
-        image = _preprocess(p) if preprocess else Image.open(p)
-        page_texts.append(pytesseract.image_to_string(image, lang=lang, config=config))
+    if segmentation == "xycut":
+        for p in paths:
+            page_texts.append(xycut_text(Image.open(p), lang=lang))
+    else:
+        config = f"--oem {oem} --psm {psm}"
+        if extra_config:
+            config = f"{config} {extra_config}"
+        for p in paths:
+            image = _preprocess(p) if preprocess else Image.open(p)
+            page_texts.append(
+                pytesseract.image_to_string(image, lang=lang, config=config)
+            )
     raw_text = "\n\n".join(page_texts)
 
     schema = parse_text(raw_text, photo_filename=paths[0].name)

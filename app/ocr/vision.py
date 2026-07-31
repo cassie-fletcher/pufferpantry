@@ -210,8 +210,11 @@ INGREDIENT_RUN_MIN = 3
 CONTINUATION_INDENT_MIN_FRACTION = 0.006  # ~7 px at 1176 wide
 CONTINUATION_INDENT_MAX_FRACTION = 0.080  # ~94 px at 1176 wide
 
-#: Title detection: search the top of the page for the physically largest
-#: line, then keep the run of lines at least this tall relative to it.
+#: Title detection: search the top of the FIRST page for the physically
+#: largest line, then keep the run of lines at least this tall relative to
+#: it. When a PREP/COOK/TOTAL/SERVES metadata line is present, only lines
+#: BEFORE it are title candidates — see _find_title for why raw height alone
+#: is not trusted.
 TITLE_SEARCH_TOP_FRACTION = 0.35
 TITLE_HEIGHT_RATIO = 0.70
 
@@ -314,6 +317,11 @@ class VisionOutput:
     image_width: int
     image_height: int
     options: dict[str, Any]
+    #: Height of the FIRST page when several pages were stacked (see
+    #: _stack_pages); None for a single page. The title search must not use
+    #: the stacked height — the title lives on page 1, and 35% of a two-page
+    #: stack reaches well into page 2.
+    first_page_height: int | None = None
 
 
 # --- Talking to the Swift binary --------------------------------------------
@@ -492,19 +500,40 @@ def read_lines(image_path: Path, **opts: Any) -> VisionOutput:
 # function. Blocks that are not found are simply empty — nothing is guessed.
 
 
-def _find_ingredient_start(lines: list[TextLine]) -> int | None:
+def _find_ingredient_start(lines: list[TextLine], image_width: int) -> int | None:
     """First index where an ingredient list plausibly begins.
 
-    RULE: index i such that at least INGREDIENT_RUN_MIN of lines[i:i+WINDOW]
-    start with a quantity, and lines[i] itself starts with a quantity. The
-    window requirement stops a lone numeric line in the headnote from being
-    mistaken for the list.
+    RULE: index i such that lines[i] starts with a quantity and, among the
+    next INGREDIENT_RUN_WINDOW ingredient STARTS from i onward, at least
+    INGREDIENT_RUN_MIN start with a quantity. The window requirement stops a
+    lone numeric line in the headnote from being mistaken for the list.
+
+    The window counts ingredient starts, not raw lines: a line indented
+    within the continuation band relative to the line that started the
+    current entry (the same geometric rule as _group_ingredient_lines) is a
+    WRAPPED line and is skipped. Counting raw lines instead breaks lists
+    whose first entries wrap — e.g. "1 pound baby potatoes, halved if /
+    large" contributes one quantity hit but two lines, so a run of wrapped
+    entries dilutes the window, the detected start lands mid-list, and the
+    real first ingredients leak into the title/headnote blocks.
     """
+    indent_min = CONTINUATION_INDENT_MIN_FRACTION * image_width
+    indent_max = CONTINUATION_INDENT_MAX_FRACTION * image_width
     for i, line in enumerate(lines):
         if not QUANTITY_START_RE.match(line.text):
             continue
-        window = lines[i : i + INGREDIENT_RUN_WINDOW]
-        hits = sum(1 for ln in window if QUANTITY_START_RE.match(ln.text))
+        hits = 0
+        starts = 0
+        start_x0: float | None = None
+        for ln in lines[i:]:
+            if start_x0 is not None and indent_min <= ln.x0 - start_x0 <= indent_max:
+                continue  # wrapped continuation of the current entry
+            starts += 1
+            if starts > INGREDIENT_RUN_WINDOW:
+                break
+            start_x0 = ln.x0
+            if QUANTITY_START_RE.match(ln.text):
+                hits += 1
         if hits >= INGREDIENT_RUN_MIN:
             return i
     return None
@@ -537,16 +566,26 @@ def _find_note_start(lines: list[TextLine], search_from: int) -> int | None:
 
 
 def _find_title(
-    lines: list[TextLine], stop_before: int, image_height: int
+    lines: list[TextLine], stop_before: int, page_height: int
 ) -> tuple[str, int, int]:
     """The recipe title, plus the half-open line range it consumed.
 
-    RULE: among lines in the top TITLE_SEARCH_TOP_FRACTION of the page (and
-    before the ingredient list), find the physically tallest. The title is
-    that line plus the run of adjacent lines — BEFORE it as well as after —
-    that are at least TITLE_HEIGHT_RATIO as tall. Titles wrap, and the
+    RULE: among lines in the top TITLE_SEARCH_TOP_FRACTION of the FIRST page
+    (and before the ingredient list), find the physically tallest. The title
+    is that line plus the run of adjacent lines — BEFORE it as well as after
+    — that are at least TITLE_HEIGHT_RATIO as tall. Titles wrap, and the
     tallest line is often the second one ("slow-roasted" / "sunday chicken"),
     so extending in only one direction loses half the title.
+
+    RULE (metadata anchor): if any candidate-range line is PREP/COOK/TOTAL/
+    SERVES metadata, only lines BEFORE the first such line stay candidates,
+    and the title run may not extend past it. The title is printed above
+    that block, never below it. This matters because bbox height alone is a
+    noisy signal on hand-held photos: page tilt inflates a box by roughly
+    width * sin(tilt), so a long skewed body or ingredient line can measure
+    TALLER than a short display-font title line (observed: an ingredient
+    line at 61 px vs title lines at 36-48 px). Document structure beats raw
+    pixels here. If the restriction leaves no candidates, it is dropped.
 
     Display fonts are often set in lower case. If the result is entirely
     lower case, it is title-cased; if it already has capitals, it is left
@@ -555,10 +594,20 @@ def _find_title(
     Returns (title, start_index, end_index). The range is returned so the
     headnote block can skip these lines instead of guessing at them.
     """
-    cutoff = TITLE_SEARCH_TOP_FRACTION * image_height
+    cutoff = TITLE_SEARCH_TOP_FRACTION * page_height
     candidates = [i for i in range(stop_before) if lines[i].y0 < cutoff]
     if not candidates:
         return FALLBACK_TITLE, 0, 0
+
+    run_stop = stop_before
+    meta = next(
+        (i for i in range(stop_before) if COOK_INFO_RE.match(lines[i].text)), None
+    )
+    if meta is not None:
+        restricted = [i for i in candidates if i < meta]
+        if restricted:
+            candidates = restricted
+            run_stop = meta
 
     tallest = max(candidates, key=lambda i: lines[i].height)
     threshold = lines[tallest].height * TITLE_HEIGHT_RATIO
@@ -567,7 +616,7 @@ def _find_title(
     while start - 1 >= 0 and lines[start - 1].height >= threshold:
         start -= 1
     end = tallest + 1
-    while end < stop_before and lines[end].height >= threshold:
+    while end < run_stop and lines[end].height >= threshold:
         end += 1
 
     title = " ".join(lines[i].text for i in range(start, end)).strip()
@@ -675,12 +724,19 @@ def parse_lines(vision: VisionOutput, photo_filename: str) -> PhotoExtractResult
         logger.warning("No text lines to parse for %s", photo_filename)
         return PhotoExtractResult(title=FALLBACK_TITLE, photo_filename=photo_filename)
 
-    ing_start = _find_ingredient_start(lines)
+    ing_start = _find_ingredient_start(lines, vision.image_width)
     steps_start = _find_steps_start(lines, ing_start if ing_start is not None else 0)
     note_start = _find_note_start(lines, steps_start if steps_start is not None else 0)
 
     title_stop = ing_start if ing_start is not None else len(lines)
-    title, title_start, title_end = _find_title(lines, title_stop, vision.image_height)
+    # The title lives on the first page; for stacked pages the search cutoff
+    # must be a fraction of PAGE 1's height, not of the whole stack.
+    page_height = (
+        vision.first_page_height
+        if vision.first_page_height is not None
+        else vision.image_height
+    )
+    title, title_start, title_end = _find_title(lines, title_stop, page_height)
 
     # Ingredients run from the start of the list to the first numbered step.
     ingredients: list[IngredientCreate] = []
@@ -810,6 +866,7 @@ def _stack_pages(outputs: list[VisionOutput]) -> VisionOutput:
         image_width=max(o.image_width for o in outputs),
         image_height=int(y_offset - PAGE_STACK_GAP),
         options=outputs[0].options,
+        first_page_height=outputs[0].image_height,
     )
 
 

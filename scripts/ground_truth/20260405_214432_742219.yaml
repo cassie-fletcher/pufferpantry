@@ -1,0 +1,67 @@
+# Ground truth for Salmon with Green Goddess Dressing.
+# Photos: 20260405_214432_742219.jpg (FIRST page — has the title)
+#         20260405_214432_0a73f4.jpg
+#
+# Fill in by reading the PHOTOS, not from memory and not from any OCR output.
+# Capture exactly what's printed — including any typos on the page.
+#
+# Conventions (carried over from the Sunday Chicken GT + rulings since):
+#   - quantity: DECIMAL form ("1 1/2" on the page -> 1.5 here). Empty string
+#     for non-numeric (to taste / for serving). The scorer canonicalizes OCR
+#     output to decimals before comparing.
+#   - unit: freeform, exactly as printed — including plurality ("cup" vs
+#     "cups" as the page has it).
+#   - item: core ingredient name; descriptors go in prep/notes.
+#   - ONE PHYSICAL INGREDIENT, ONE ENTRY. "salt and pepper" printed on one
+#     line = two entries. "X and/or Y" with no quantity = two entries, each
+#     marked optional in notes. "X and/or Y" WITH a quantity = ONE entry
+#     (one measured slot, filled by whichever you have).
+#   - a compound like "3 cloves ... plus 3 whole" = one entry, quantities
+#     summed, the split described in prep/notes.
+#
+# NEW for multi-page + sub-recipe (first recipe to use these):
+#   - pages: ordered list, first = title page.
+#   - ingredients gain an optional `group` (default "Main"). If the dressing's
+#     OWN ingredient list were printed on these pages, its entries would get
+#     group: "Green Goddess Dressing" — from what we can tell it is on page
+#     153 instead, so likely everything here is Main and the dressing appears
+#     only as a REFERENCE ingredient in the main list (record it as printed:
+#     item + the page reference in notes).
+#   - steps gain an optional `section` (omit for main-recipe steps). Only
+#     needed if these pages print a separately-numbered sub-recipe block.
+#   - page_furniture: page numbers / running heads you see, so raw-text
+#     comparisons can knowingly ignore them. Optional.
+
+pages:
+  - 20260405_214432_742219.jpg
+  - 20260405_214432_0a73f4.jpg
+
+recipe_title: ""
+
+headnote: |
+
+
+ingredients:
+  - quantity: ""
+    unit: ""
+    item: ""
+    prep: ""
+    notes: ""
+    # group: "Main"          # only needed when not Main
+
+cook_info:
+  prep_time: ""
+  cook_time: ""
+  total_time: ""
+  oven_temp: ""
+  serves: ""
+
+steps:
+  - number: 1
+    text: ""
+    # section: ""            # only for a separately-numbered sub-recipe block
+
+notes_sidebar: ""
+
+page_furniture:
+  - ""                       # e.g. page numbers, running heads

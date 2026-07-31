@@ -93,9 +93,9 @@ script") underpins all of the above.
 - [ ] **Live-test URL extraction end-to-end.** The local JSON-LD reader is fully mocked-tested; run it against real HBH/skinnytaste URLs and eyeball the parsed recipes (Cassie suspects it's quite good — verify). No API involved; just real fetches.
 
 ### Code cleanup
-- [ ] "Step" is overloaded in photo_service.py — means both extraction pipeline stages and recipe cooking steps. Rename to disambiguate.
-- [ ] Validate Claude's JSON response against a Pydantic schema after `_parse_claude_json` (line ~351). Currently no check that required fields exist or have correct types.
-- [ ] Replace raw `dict` parameter in `extract_from_url` (routers/recipes.py) with a Pydantic model for input validation.
+- [ ] "Step" is overloaded in photo_service.py — means both extraction pipeline stages and recipe cooking steps. NOTE (2026-07-31): the overload lives in the prompt's chain-of-thought labels, so renaming is a measurable behavior change requiring the Claude baseline run first — not mechanical cleanup.
+- [x] Validate Claude's JSON response against a Pydantic schema — done 2026-07-31: both extraction paths validate (photo via the reader's `_to_schema`, URL via `UrlExtractResult`); failures log loudly and surface as clear errors.
+- [x] Replace raw `dict` parameter in `extract_from_url` with a Pydantic model — done 2026-07-31 (`UrlExtractRequest`; blank/missing URL → 422).
 
 ### New features (laptop-friendly)
 

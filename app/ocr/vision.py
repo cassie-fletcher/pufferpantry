@@ -95,6 +95,7 @@ from typing import Any, Sequence
 
 from app.ocr.base import Reading
 from app.ocr.normalize import normalize_ingredients
+from app.ocr.resolve import resolve_references
 from app.schemas.recipe import IngredientCreate, PhotoExtractResult
 
 logger = logging.getLogger(__name__)
@@ -891,11 +892,43 @@ def read(image_path: Path | Sequence[Path], **opts: Any) -> Reading:
         else [Path(image_path)]
     )
     outputs = [read_lines(p, **opts) for p in paths]
-    vision = outputs[0] if len(outputs) == 1 else _stack_pages(outputs)
+    # raw_text deliberately stays the full join of ALL pages in order —
+    # referenced pages included — for scoring and debugging.
     raw_text = "\n\n".join(
         "\n".join(line.text for line in out.lines) for out in outputs
     )
+
+    if len(outputs) == 1:
+        schema = parse_lines(outputs[0], photo_filename=paths[0].name)
+        return Reading(method=METHOD_NAME, schema=schema, raw_text=raw_text or None)
+
+    # Multi-page: pages after the first are either CONTINUATIONS (stacked
+    # under page 1 as before) or REFERENCED pages — a sub-recipe that appears
+    # as an ingredient in the main recipe, detected by a heading on that
+    # page's TEXT matching a main-list ingredient (app/ocr/resolve.py).
+    # Detection uses a provisional parse of page 1 alone for the ingredient
+    # list; referenced pages contribute only their text to the resolver and
+    # are excluded from the geometric stack.
+    page_texts = [
+        "\n".join(line.text for line in out.lines) for out in outputs
+    ]
+    provisional = parse_lines(outputs[0], photo_filename=paths[0].name)
+    _, continuation_rel = resolve_references(provisional, page_texts[1:])
+    continuation_pages = {i + 1 for i in continuation_rel}
+
+    main_outputs = [outputs[0]] + [
+        outputs[i] for i in range(1, len(outputs)) if i in continuation_pages
+    ]
+    vision = main_outputs[0] if len(main_outputs) == 1 else _stack_pages(main_outputs)
     schema = parse_lines(vision, photo_filename=paths[0].name)
+
+    referenced_texts = [
+        page_texts[i]
+        for i in range(1, len(outputs))
+        if i not in continuation_pages
+    ]
+    if referenced_texts:
+        schema, _ = resolve_references(schema, referenced_texts)
     return Reading(method=METHOD_NAME, schema=schema, raw_text=raw_text or None)
 
 

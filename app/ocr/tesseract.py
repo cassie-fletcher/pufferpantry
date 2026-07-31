@@ -50,6 +50,7 @@ from PIL import Image
 from app.ocr.base import Reading
 from app.ocr.xycut import xycut_text
 from app.ocr.normalize import normalize_ingredients
+from app.ocr.resolve import resolve_references
 from app.schemas.recipe import IngredientCreate, PhotoExtractResult
 
 # --------------------------------------------------------------------------
@@ -562,7 +563,41 @@ def read(
             )
     raw_text = "\n\n".join(page_texts)
 
-    schema = parse_text(raw_text, photo_filename=paths[0].name)
+    if len(page_texts) == 1:
+        schema = parse_text(raw_text, photo_filename=paths[0].name)
+        return Reading(method=METHOD_NAME, schema=schema, raw_text=raw_text)
+
+    # Multi-page: pages after the first are either CONTINUATIONS (they join
+    # the main parse via the text concatenation above) or REFERENCED pages —
+    # a sub-recipe that appears as an ingredient in the main recipe, detected
+    # by a heading on that page matching a main-list ingredient
+    # (app/ocr/resolve.py). Detection runs against a provisional parse of
+    # page 1 alone; its warnings are suppressed because the provisional parse
+    # is detection machinery, not a result anyone reviews (page-1-only text
+    # legitimately lacks steps that continue onto page 2).
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        provisional = parse_text(page_texts[0], photo_filename=paths[0].name)
+    _, continuation_rel = resolve_references(provisional, page_texts[1:])
+    continuation_pages = {i + 1 for i in continuation_rel}
+
+    # Re-parse the main recipe from page 1 + continuation pages (the existing
+    # join), THEN resolve the referenced pages against that re-parse.
+    # raw_text above deliberately stays the full join of ALL pages in order,
+    # referenced pages included, for scoring and debugging.
+    main_text = "\n\n".join(
+        text
+        for i, text in enumerate(page_texts)
+        if i == 0 or i in continuation_pages
+    )
+    schema = parse_text(main_text, photo_filename=paths[0].name)
+    referenced_texts = [
+        text
+        for i, text in enumerate(page_texts)
+        if i != 0 and i not in continuation_pages
+    ]
+    if referenced_texts:
+        schema, _ = resolve_references(schema, referenced_texts)
     return Reading(method=METHOD_NAME, schema=schema, raw_text=raw_text)
 
 

@@ -203,10 +203,20 @@ def read(
         # escape hatch: multiple uploads are BY CONTRACT one recipe (owner's
         # rule), and the first image is the page with the title.
         prompt_text += (
-            f"\n\nIMPORTANT: The {len(paths)} images above are consecutive "
-            "pages of ONE single recipe, in reading order. The FIRST image "
-            "is the first page and contains the recipe title. Do not return "
-            "them as separate recipes."
+            f"\n\nIMPORTANT: The {len(paths)} images above are pages of ONE "
+            "single recipe, in reading order. The FIRST image is the first "
+            "page and contains the recipe title. Do not return them as "
+            "separate recipes. Later images are usually consecutive pages of "
+            "the main recipe, but they MAY instead be REFERENCED pages: a "
+            "page containing a sub-recipe that appears as an ingredient in "
+            "the main recipe (e.g. the main ingredient list says "
+            '"Goddess Sauce (page 153)" and a later image shows page 153). '
+            "If a later image is such a referenced page, extract ONLY the "
+            "referenced sub-recipe block from it: put its ingredients in a "
+            'group named after the sub-recipe (the "group" field convention '
+            "above), put its instructions under a "
+            '"--- <Sub-Recipe Name> ---" section header, and IGNORE '
+            "everything else on that page."
         )
     content.append({"type": "text", "text": prompt_text})
 

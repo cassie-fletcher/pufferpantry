@@ -36,32 +36,209 @@ pages:
   - 20260405_214432_742219.jpg
   - 20260405_214432_0a73f4.jpg
 
-recipe_title: ""
+recipe_title: "slow-roasted salmon with baby potatoes and goddess sauce"
 
 headnote: |
 
 
 ingredients:
+  - quantity: "1"
+    unit: "pound"
+    item: "baby potatoes"
+    prep: "halved if large"
+    notes: ""
+    group: "Main"          # only needed when not Main
+
+  - quantity: "1/3"
+    unit: "cup"
+    item: "extra-virgin olive oil"
+    prep: ""
+    notes: "plus 2 tablespoons"
+    group: "Main"          # only needed when not Main
+
+
   - quantity: ""
     unit: ""
-    item: ""
+    item: "salt"
+    prep: ""
+    notes: "Fine pink Himalayan"
+    group: "Main"          # only needed when not Main
+
+
+  - quantity: ""
+    unit: ""
+    item: "black pepper"
+    prep: ""
+    notes: "Freshly ground"
+    group: "Main"          # only needed when not Main
+
+  - quantity: "2"
+    unit: ""
+    item: "lemons"
+    prep: "juiced"
+    notes: ""
+    group: "Main"          # only needed when not Main
+
+  - quantity: "1"
+    unit: "tablespoon"
+    item: "raw honey"
     prep: ""
     notes: ""
-    # group: "Main"          # only needed when not Main
+    group: "Main"          # only needed when not Main
+
+  - quantity: "2"
+    unit: "teaspoon"
+    item: "smoked paprika"
+    prep: ""
+    notes: ""
+    group: "Main"          # only needed when not Main
+
+  - quantity: "2"
+    unit: "teaspoon"
+    item: "ground cumin"
+    prep: ""
+    notes: ""
+    group: "Main"          # only needed when not Main
+
+  - quantity: "1-2"
+    unit: "teaspoon"
+    item: "crushed red pepper flakes"
+    prep: ""
+    notes: ""
+    group: "Main"          # only needed when not Main
+
+  - quantity: "2"
+    unit: "pounds"
+    item: "salmon fillet"
+    prep: ""
+    notes: ""
+    group: "Main"          # only needed when not Main
+
+  - quantity: "3"
+    unit: ""
+    item: "Persian cucumbers"
+    prep: "chopped"
+    notes: ""
+    group: "Main"          # only needed when not Main
+
+  - quantity: "4"
+    unit: "ounces"
+    item: "feta cheese"
+    prep: "cubed or crumbled"
+    notes: ""
+    group: "Main"          # only needed when not Main
+
+  - quantity: ""
+    unit: ""
+    item: "Goddess Sauce"
+    prep: "see subrecipe below or store-bought"
+    notes: ""
+    group: "Main"          # only needed when not Main
+
+  - quantity: ""
+    unit: ""
+    item: "Fresh dill"
+    prep: "roughly chopped"
+    notes: "for serving"
+    group: "Main"          # only needed when not Main
+
+  - quantity: ""
+    unit: ""
+    item: "Fresh basil leaves"
+    prep: "roughly chopped"
+    notes: "for serving"
+    group: "Main"          # only needed when not Main
+
+  - quantity: "1"
+    unit: ""
+    item: "avocado"
+    prep: "halved and pitted"
+    notes: ""
+    group: "sub-recipe"          # only needed when not Main
+
+  - quantity: "1"
+    unit: ""
+    item: "jalapeno"
+    prep: "halved and seeded"
+    notes: "optional"
+    group: "sub-recipe"          # only needed when not Main
+
+  - quantity: "1/4"
+    unit: "cup"
+    item: "plain Green yogurt"
+    prep: ""
+    notes: ""
+    group: "sub-recipe"          # only needed when not Main
+
+  - quantity: "1"
+    unit: ""
+    item: "lemon"
+    prep: "juiced"
+    notes: ""
+    group: "sub-recipe"          # only needed when not Main
+
+  - quantity: "1"
+    unit: "cup"
+    item: "cilantro"
+    prep: ""
+    notes: "fresh"
+    group: "sub-recipe"          # only needed when not Main
+
+  - quantity: "1/2"
+    unit: "cup"
+    item: "basil"
+    prep: ""
+    notes: "fresh leaves"
+    group: "sub-recipe"          # only needed when not Main
+
+  - quantity: "1"
+    unit: "teaspoon"
+    item: "ground cumin"
+    prep: ""
+    notes: ""
+    group: "sub-recipe"          # only needed when not Main
+
+  - quantity: ""
+    unit: ""
+    item: "salt"
+    prep: ""
+    notes: "Fine pink Himalayan salt"
+    group: "sub-recipe"          # only needed when not Main
+  
 
 cook_info:
-  prep_time: ""
-  cook_time: ""
-  total_time: ""
+  prep_time: "15 minutes"
+  cook_time: "35 minutes"
+  total_time: "50 minutes"
   oven_temp: ""
-  serves: ""
+  serves: "4"
 
 steps:
   - number: 1
-    text: ""
+    text: "Preheat the oven to 425 degrees F"
+  - number: 2
+    text: "On a rimmed baking sheet, toss the potatoes with 2 tablespoons of the olive oil. Season with salt and pepper. Roast until tender, about 25 minutes."
+  - number: 3
+    text: "Meanwhile, in a small bowl, combine the remaining 1/3 cup olive oil with the lemon juice, honey, paprika, cumin, red pepper flakes, and a pinch each of salt and pepper."
+  - number: 4
+    text: "Remove the potatoes from the oven and reduce the oven temperature to 300 degrees F. Push the potatoes to one side of the baking sheet and add the salmon (skin-side down if leaving the skin on) to the other side. Pour the olive oil sauce all over the salmon. Bake until the salmon reaches your desired doneness, 10 to 20 minutes more."
+  - number: 5
+    text: "To serve, arrange the potatoes, salmon, cucumbers and feta on plates. Drizzle any oil left in the pan over the top. Dollop the goddess sauce onto the potatoes and salmon. Sprinkle with the dill and basil and serve."
     # section: ""            # only for a separately-numbered sub-recipe block
+  - number: 1
+    text: "In a blender or food processor, combine the avocado, jalapeno (if using), yogurt, lemon juice, cilantro, basil, cumin, a pinch of salt and 1 tablespoon of water."
+    section: "sub-recipe"
+  - number: 2
+    text: "Blend until smooth and creamy, adding water 1 tablespoon at a time, as needed, to thin the sauce."
+    section: "sub-recipe"
+  - number: 3
+    text: "Taste and add more salt as needed."
+    section: "sub-recipe"
+  - number: 4
+    text: "Store refridgerated in an airtight container for up to 1 week."
+    section: "sub-recipe"
 
-notes_sidebar: ""
+notes_sidebar: "In the dead of winter, I gravitate toward all those cozy pasta and pizza and short rib and roast chicken recipes I love so much. Sometime midseason, I realize I am cooking the same dishes over and over again. And that's when I think about what I haven't made in a while. To get out of that rut, more times than not I turn to this slow-roasted salmon. It's just the right combination of light and healthy, but still super cozy. Slow-roasting the salmon really locks in its clavor and turns out a luscious butter fillet that flakes perfectly every time. You can use skin-on or skinless salmon---I personally love the additional healthy omega-3 fatty acids and flavor in the skin. I roast some baby potatoes right alongside, and then serve everything with Goddess sauce, an herby avocado-yogurt sauce that you'll want to scoop up into every bite."
 
 page_furniture:
   - ""                       # e.g. page numbers, running heads

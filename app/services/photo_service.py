@@ -174,6 +174,34 @@ def save_photo(upload_file: UploadFile) -> str:
     return filename
 
 
+def _extract_response_text(message) -> str:
+    """Pull the assistant's visible text out of a Messages API response.
+
+    Deliberately not `message.content[0].text`: on models with thinking on by
+    default (claude-opus-5), content[0] is a thinking block, not text —
+    indexing position 0 either crashes or returns an empty string. Scan for
+    the first block that is actually text, and surface refusals/truncation
+    as what they are instead of downstream JSON parse errors.
+    """
+    if message.stop_reason == "refusal":
+        raise ValueError(
+            "Claude refused this request (stop_reason='refusal'). "
+            f"stop_details={getattr(message, 'stop_details', None)}"
+        )
+    if message.stop_reason == "max_tokens":
+        raise ValueError(
+            "Response hit the max_tokens ceiling and is truncated, so any "
+            "JSON in it is incomplete. Re-run with a larger max_tokens."
+        )
+    for block in message.content:
+        if block.type == "text":
+            return block.text
+    raise ValueError(
+        "Response contained no text block "
+        f"(block types: {[b.type for b in message.content]})."
+    )
+
+
 def _find_fraction_disagreements(raw_response: str) -> list[dict]:
     """Compare fractions from INGREDIENT TRANSCRIPTION vs AMOUNTS IN STEPS.
 
@@ -235,11 +263,11 @@ def _resolve_with_voting(client, content, initial_recipes, disagreements):
 
     def _call_claude():
         msg = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=settings.claude_model_fast,
             max_tokens=8192,
             messages=[{"role": "user", "content": content}],
         )
-        raw = msg.content[0].text
+        raw = _extract_response_text(msg)
         print("=== VOTING CALL RESPONSE ===")
         print(raw[:1500])
         print("=== END VOTING RESPONSE ===\n")
@@ -337,12 +365,14 @@ def extract_recipe_from_photos(photo_paths: list[Path]) -> dict:
     client = Anthropic(api_key=settings.anthropic_api_key)
 
     message = client.messages.create(
-        model="claude-opus-4-6",
-        max_tokens=8192,
+        model=settings.claude_model_extraction,
+        # Thinking models spend max_tokens on thinking AND visible text; 8192
+        # risked truncating mid-JSON (see app/ocr/claude.py for the numbers).
+        max_tokens=16000,
         messages=[{"role": "user", "content": content}],
     )
 
-    raw = message.content[0].text
+    raw = _extract_response_text(message)
     print("=== CLAUDE RAW RESPONSE ===")
     print(raw[:3000])
     print("=== END RAW RESPONSE ===")
@@ -469,12 +499,12 @@ def extract_pantry_items_from_photos(
 
     client = Anthropic(api_key=settings.anthropic_api_key)
     message = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model=settings.claude_model_fast,
         max_tokens=8192,
         messages=[{"role": "user", "content": content}],
     )
 
-    result = _parse_claude_json(message.content[0].text)
+    result = _parse_claude_json(_extract_response_text(message))
     return result if isinstance(result, list) else [result]
 
 
@@ -541,12 +571,12 @@ def extract_zone_layout_from_photos(
 
     client = Anthropic(api_key=settings.anthropic_api_key)
     message = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model=settings.claude_model_fast,
         max_tokens=8192,
         messages=[{"role": "user", "content": content}],
     )
 
-    return _parse_claude_json(message.content[0].text)
+    return _parse_claude_json(_extract_response_text(message))
 
 
 # ---------------------------------------------------------------------------
@@ -673,12 +703,12 @@ def extract_zone_items_from_photos(
 
     client = Anthropic(api_key=settings.anthropic_api_key)
     message = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model=settings.claude_model_fast,
         max_tokens=8192,
         messages=[{"role": "user", "content": content}],
     )
 
-    result = _parse_claude_json(message.content[0].text)
+    result = _parse_claude_json(_extract_response_text(message))
     return result if isinstance(result, list) else [result]
 
 

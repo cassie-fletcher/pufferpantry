@@ -38,7 +38,8 @@ def _make_test_image() -> io.BytesIO:
 def _mock_claude_response(response_text: str) -> MagicMock:
     """Create a mock Anthropic messages.create() return value."""
     mock_message = MagicMock()
-    mock_message.content = [MagicMock(text=response_text)]
+    mock_message.stop_reason = "end_turn"
+    mock_message.content = [MagicMock(text=response_text, type="text")]
     return mock_message
 
 

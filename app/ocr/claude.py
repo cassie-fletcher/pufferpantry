@@ -59,7 +59,6 @@ from pathlib import Path
 from typing import Sequence
 
 from anthropic import Anthropic
-from anthropic.types import Message
 from pydantic import ValidationError
 
 from app.config import settings
@@ -75,6 +74,7 @@ from app.services.photo_service import (  # noqa: PLC2701 - private, see comment
     EXTRACTION_PROMPT,
     MEDIA_TYPES,
     _build_image_content,
+    _extract_response_text,
     _parse_claude_json,
 )
 
@@ -251,41 +251,6 @@ def read(
     # normalization (app/ocr/normalize.py) at its own boundary.
     schema.ingredients = normalize_ingredients(schema.ingredients)
     return Reading(method=METHOD_NAME, schema=schema, raw_text=raw_text)
-
-
-def _extract_response_text(message: Message) -> str:
-    """Pull the assistant's visible text out of a Messages API response.
-
-    Deliberately not `message.content[0].text` — the way production does it.
-    On claude-opus-5 thinking is on by default, so `content[0]` is a thinking
-    block, not text, and indexing position 0 would either crash or (with
-    `display="omitted"`, the default) hand back an empty string. Scan for the
-    first block that is actually text.
-
-    Raises:
-        ValueError: on a refusal, a truncated response, or no text block. Each
-            of those would otherwise surface downstream as a confusing JSON
-            parse error rather than as what it is.
-    """
-    if message.stop_reason == "refusal":
-        raise ValueError(
-            "Claude refused this request (stop_reason='refusal'); no extraction "
-            f"was produced. stop_details={getattr(message, 'stop_details', None)}"
-        )
-    if message.stop_reason == "max_tokens":
-        raise ValueError(
-            "Response hit the max_tokens ceiling and is truncated, so any JSON "
-            "in it is incomplete. Re-run with a larger max_tokens."
-        )
-
-    for block in message.content:
-        if block.type == "text":
-            return block.text
-
-    raise ValueError(
-        "Response contained no text block "
-        f"(block types: {[b.type for b in message.content]})."
-    )
 
 
 def _to_schema(raw_text: str, *, photo_filename: str) -> PhotoExtractResult:

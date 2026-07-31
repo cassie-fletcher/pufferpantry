@@ -92,6 +92,12 @@ script") underpins all of the above.
 
 - [ ] **Live-test URL extraction end-to-end.** The local JSON-LD reader is fully mocked-tested; run it against real HBH/skinnytaste URLs and eyeball the parsed recipes (Cassie suspects it's quite good — verify). No API involved; just real fetches.
 
+- [ ] **Fix the multi-page photo orphan.** `Recipe.photo_filename` is a single column and the upload endpoint stamps `filenames[0]`, so page 2 of a multi-page recipe is saved to disk but referenced by no DB row — undiscoverable, un-redisplayable, unmanaged. Needs a proper pages representation + Alembic migration (additive; never drop).
+
+- [ ] **Sub-recipe yield needs a schema/DB home.** The shopping-list design consumes it ("goddess sauce makes 1 3/4 cups" -> store-bought line quantity), parse_block currently discards MAKES lines, and groups aren't DB entities. Storage decision pending (JSON column on Recipe vs a sub-recipe table).
+
+- [ ] **`claude_model_fast` default is likely retired.** `claude-sonnet-4-20250514` has a published retirement date of 2026-06-15 (in the past). URL import no longer cares (local now), but pantry scans still use this setting — bump the default (current Sonnet) or set `.env`, pending Cassie's model choice. Unverified live (would need an API call).
+
 ### Code cleanup
 - [ ] "Step" is overloaded in photo_service.py — means both extraction pipeline stages and recipe cooking steps. NOTE (2026-07-31): the overload lives in the prompt's chain-of-thought labels, so renaming is a measurable behavior change requiring the Claude baseline run first — not mechanical cleanup.
 - [x] Validate Claude's JSON response against a Pydantic schema — done 2026-07-31: both extraction paths validate (photo via the reader's `_to_schema`, URL via `UrlExtractResult`); failures log loudly and surface as clear errors.

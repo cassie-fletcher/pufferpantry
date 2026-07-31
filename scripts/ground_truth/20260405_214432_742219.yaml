@@ -206,6 +206,10 @@ ingredients:
     group: "goddess sauce"          # only needed when not Main
   
 
+sub_recipes:
+  goddess sauce:
+    yield: "1 3/4 cups"     # printed "MAKES ABOUT 1 3/4 CUPS"
+
 cook_info:
   prep_time: "15 minutes"
   cook_time: "35 minutes"

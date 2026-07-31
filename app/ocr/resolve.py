@@ -122,14 +122,24 @@ _FRACTION_CHARS = "".join(UNICODE_FRACTIONS)
 _FRACTION_AFTER_DIGIT_RE = re.compile(rf"(?<=\d)\s*([{_FRACTION_CHARS}])")
 _FRACTION_RE = re.compile(rf"[{_FRACTION_CHARS}]")
 
-# RULE (block ingredient): a block line is an ingredient iff it starts with a
+# RULE (quantity-led line): a line is quantity-led iff it starts with a
 # quantity — a mixed fraction ("1 1/2"), bare fraction ("1/2"), decimal, or
 # integer, ASCII after fraction-glyph rewriting — followed by whitespace and
 # at least one more character. "1. Blend..." does NOT match ("." is not
 # whitespace), so numbered sub-recipe steps land in the instructions.
+# Being quantity-led is necessary but NOT sufficient to be an ingredient:
+# membership in the ingredient RUN decides (see parse_block).
 _QUANTITY_RE = re.compile(
     r"^(\d+\s+\d+\s*/\s*\d+|\d+\s*/\s*\d+|\d+(?:\.\d+)?)\s+(\S.*)$"
 )
+
+# RULE (prose line): a line ending in sentence-final punctuation reads as
+# prose, not as an ingredient. Ingredient lines are noun phrases ("Fine pink
+# Himalayan salt"); an instruction sentence sitting right after the list
+# ("Blend everything until smooth.") ends with a period. Used only to stop
+# the ingredient run at a quantity-LESS line — quantity-led lines are never
+# tested against it.
+_PROSE_END_RE = re.compile(r"[.!?]$")
 
 
 # --------------------------------------------------------------------------
@@ -275,20 +285,60 @@ def find_reference(
     return None
 
 
+def _find_ingredient_run(
+    kept: list[str], quantity_led: list[bool]
+) -> tuple[int, int]:
+    """The half-open [start, end) index range of the block's ingredient run.
+
+    RULE (ingredient run): a block's ingredients form ONE contiguous run of
+    lines in which at least half are quantity-led. The run is built
+    constructively, which both guarantees that density and makes the
+    boundary unique:
+
+      - the run starts at the first quantity-led line;
+      - a quantity-led line always extends the run;
+      - a quantity-less line extends the run only when (a) the line
+        immediately before it is quantity-led — two quantity-less lines in
+        a row mean the instruction paragraph has begun — and (b) it does
+        not end like prose (see _PROSE_END_RE): "Fine pink Himalayan salt"
+        joins, "Blend everything until smooth." does not.
+
+    Because quantity-less lines can never neighbor each other inside the
+    run, at least half of any run found this way is quantity-led.
+    Returns (0, 0) when the block has no quantity-led line at all.
+    """
+    start = next((i for i, led in enumerate(quantity_led) if led), None)
+    if start is None:
+        return 0, 0
+    end = start + 1
+    for i in range(start + 1, len(kept)):
+        if quantity_led[i]:
+            end = i + 1
+        elif quantity_led[i - 1] and not _PROSE_END_RE.search(kept[i]):
+            end = i + 1
+        else:
+            break
+    return start, end
+
+
 def parse_block(
     block_text: str, group: str
 ) -> tuple[list[IngredientCreate], str]:
     """Parse an extracted block as a mini-recipe.
 
-    Quantity-led lines (see _QUANTITY_RE) become ingredients — leading
-    quantity token(s) as `amount`, the next token as `unit` iff it is a
-    plausible unit word (UNIT_WORDS), the rest as `name`. Heading-shaped
-    lines are dropped. Everything else becomes the instruction paragraph
-    (joined, whitespace-normalized). Ingredients go through the shared
-    `normalize_ingredients` with `group` set on every entry.
+    After the heading/metadata drops, the block's ingredient RUN is located
+    (see _find_ingredient_run). Every line INSIDE the run is an ingredient:
+    quantity-led lines split into `amount` / `unit` (iff the next token is a
+    plausible unit word, UNIT_WORDS) / `name`; quantity-less lines become
+    ingredients with amount=None — that is how "Fine pink Himalayan salt"
+    survives. Every line OUTSIDE the run joins the instruction paragraph
+    (joined, whitespace-normalized) — even a quantity-led one, so a wrapped
+    instruction line like "1 tablespoon at a time, as needed, to thin the"
+    is NOT an ingredient, wherever a reader's ordering put it. Ingredients
+    go through the shared `normalize_ingredients` with `group` set on every
+    entry.
     """
-    ingredients: list[IngredientCreate] = []
-    instruction_lines: list[str] = []
+    kept: list[str] = []
     for line in block_text.splitlines():
         stripped = line.strip()
         if not stripped:
@@ -299,27 +349,53 @@ def parse_block(
         # instructions — "goddess sauce" opening its own block.
         if _same_heading(stripped, group):
             continue
-        match = _QUANTITY_RE.match(_normalize_fractions(stripped))
-        if match:
-            amount = " ".join(match.group(1).split())  # collapse "1  1/2"
-            words = match.group(2).strip().split()
-            unit: str | None = None
-            if words and words[0].strip(_EDGE_PUNCT).lower() in UNIT_WORDS:
-                unit = words[0].strip(_EDGE_PUNCT)
-                words = words[1:]
-            name = " ".join(words).strip(" ,;")
-            if name:
+        kept.append(stripped)
+
+    quantity_led = [
+        bool(_QUANTITY_RE.match(_normalize_fractions(line))) for line in kept
+    ]
+    run_start, run_end = _find_ingredient_run(kept, quantity_led)
+
+    ingredients: list[IngredientCreate] = []
+    instruction_lines: list[str] = []
+    for i, stripped in enumerate(kept):
+        if run_start <= i < run_end:
+            if quantity_led[i]:
+                match = _QUANTITY_RE.match(_normalize_fractions(stripped))
+                amount = " ".join(match.group(1).split())  # collapse "1  1/2"
+                words = match.group(2).strip().split()
+                unit: str | None = None
+                if words and words[0].strip(_EDGE_PUNCT).lower() in UNIT_WORDS:
+                    unit = words[0].strip(_EDGE_PUNCT)
+                    words = words[1:]
+                name = " ".join(words).strip(" ,;")
+                if name:
+                    ingredients.append(
+                        IngredientCreate(
+                            name=name,
+                            amount=amount,
+                            unit=unit,
+                            order=len(ingredients),
+                            group=group,
+                        )
+                    )
+                    continue
+                # Quantity with no name left after the unit ("2 cups" alone):
+                # nothing to admit — treat as paragraph text, as before.
+                instruction_lines.append(stripped)
+            else:
+                # Quantity-LESS ingredient inside the run: amount stays None.
                 ingredients.append(
                     IngredientCreate(
-                        name=name,
-                        amount=amount,
-                        unit=unit,
+                        name=stripped.strip(" ,;"),
+                        amount=None,
+                        unit=None,
                         order=len(ingredients),
                         group=group,
                     )
                 )
-                continue
-        instruction_lines.append(stripped)
+        else:
+            instruction_lines.append(stripped)
 
     instructions = re.sub(r"\s+", " ", " ".join(instruction_lines)).strip()
     return normalize_ingredients(ingredients), instructions

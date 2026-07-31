@@ -151,6 +151,127 @@ def test_parse_block_quantity_unit_name_split():
 
 
 # --------------------------------------------------------------------------
+# Ingredient-run detection (parse_block)
+# --------------------------------------------------------------------------
+
+
+def test_parse_block_quantityless_line_inside_run_is_ingredient():
+    # A quantity-less noun-phrase line BETWEEN or right AFTER quantity-led
+    # lines is a real ingredient (amount=None) — the sauce's salt line.
+    block = (
+        "GODDESS SAUCE\n"
+        "1 avocado, halved and pitted\n"
+        "Juice of 1 lemon\n"
+        "1 teaspoon ground cumin\n"
+        "Fine pink Himalayan salt\n"
+    )
+    ingredients, instructions = parse_block(block, group="GODDESS SAUCE")
+    assert [i.name for i in ingredients] == [
+        "avocado, halved and pitted",
+        "Juice of 1 lemon",
+        "ground cumin",
+        "Fine pink Himalayan salt",
+    ]
+    by_name = {i.name: i for i in ingredients}
+    assert by_name["Juice of 1 lemon"].amount is None
+    assert by_name["Fine pink Himalayan salt"].amount is None
+    assert by_name["Fine pink Himalayan salt"].unit is None
+    assert instructions == ""
+
+
+def test_parse_block_quantity_led_line_after_run_is_not_ingredient():
+    # A quantity-led line deep in the instruction paragraph (a wrapped
+    # instruction like "1 tablespoon at a time...") must NOT become an
+    # ingredient: the run has ended by then.
+    block = (
+        "GODDESS SAUCE\n"
+        "1 avocado, halved and pitted\n"
+        "1/4 cup plain Greek yogurt\n"
+        "In a blender, combine the avocado and yogurt.\n"
+        "Blend until smooth and creamy, adding water\n"
+        "1 tablespoon at a time, as needed, to thin the\n"
+        "sauce. Taste and add more salt as needed.\n"
+    )
+    ingredients, instructions = parse_block(block, group="GODDESS SAUCE")
+    assert [i.name for i in ingredients] == [
+        "avocado, halved and pitted",
+        "plain Greek yogurt",
+    ]
+    assert "1 tablespoon at a time" in instructions
+    assert instructions.startswith("In a blender")
+
+
+def test_parse_block_run_detection_on_mixed_fixture():
+    # Modeled on the real sauce block in column order: heading + metadata,
+    # then the ingredient run (with quantity-less lines inside it), then the
+    # paragraph with an embedded quantity-led wrapped line, then furniture.
+    block = (
+        "goddess sauce\n"
+        "MAKES ABOUT 1 1/2 CUPS\n"
+        "1 avocado, halved and pitted\n"
+        "1 jalapeño, halved and seeded (optional)\n"
+        "1/4 cup plain Greek yogurt\n"
+        "Juice of 1 lemon\n"
+        "1 cup fresh cilantro\n"
+        "1/2 cup fresh basil leaves\n"
+        "1 teaspoon ground cumin\n"
+        "Fine pink Himalayan salt\n"
+        "In a blender or food processor, combine\n"
+        "the avocado, jalapeño (if using), yogurt,\n"
+        "lemon juice, cilantro, basil, cumin, a pinch\n"
+        "of salt, and 1 tablespoon of water. Blend\n"
+        "until smooth and creamy, adding water\n"
+        "1 tablespoon at a time, as needed, to thin the\n"
+        "sauce. Taste and add more salt as needed.\n"
+    )
+    ingredients, instructions = parse_block(block, group="goddess sauce")
+
+    # The run is exactly the eight ingredient lines: quantity-less lines
+    # inside it are admitted, nothing from the paragraph leaks in.
+    assert [i.name for i in ingredients] == [
+        "avocado, halved and pitted",
+        "jalapeño, halved and seeded (optional)",
+        "plain Greek yogurt",
+        "Juice of 1 lemon",
+        "fresh cilantro",
+        "fresh basil leaves",
+        "ground cumin",
+        "Fine pink Himalayan salt",
+    ]
+    assert [i.amount for i in ingredients] == [
+        "1", "1", "1/4", None, "1", "1/2", "1", None,
+    ]
+    assert all(i.group == "goddess sauce" for i in ingredients)
+    # The wrapped instruction line stays instruction text.
+    assert "1 tablespoon at a time, as needed, to thin the" in instructions
+    assert instructions.startswith("In a blender or food processor")
+
+
+def test_parse_block_trailing_prose_line_is_not_ingredient():
+    # A quantity-less line directly after the run that ends like a sentence
+    # is prose, not an ingredient — it starts the paragraph.
+    block = (
+        "GODDESS SAUCE\n"
+        "1/2 cup mayonnaise\n"
+        "2 tablespoons lemon juice\n"
+        "Blend everything until smooth.\n"
+        "Season with salt.\n"
+    )
+    ingredients, instructions = parse_block(block, group="GODDESS SAUCE")
+    assert [i.name for i in ingredients] == ["mayonnaise", "lemon juice"]
+    assert instructions == "Blend everything until smooth. Season with salt."
+
+
+def test_parse_block_no_quantity_led_lines_means_no_ingredients():
+    # Without a single quantity-led line there is no run: everything that
+    # survives the heading drops is instructions.
+    block = "GODDESS SAUCE\nWhisk the dressing well before serving.\n"
+    ingredients, instructions = parse_block(block, group="GODDESS SAUCE")
+    assert ingredients == []
+    assert instructions == "Whisk the dressing well before serving."
+
+
+# --------------------------------------------------------------------------
 # Merge
 # --------------------------------------------------------------------------
 

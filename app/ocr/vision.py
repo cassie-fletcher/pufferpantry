@@ -853,6 +853,73 @@ BLOCK_GAP_FACTOR = 2.0
 _ROW_JITTER_PX = 8.0
 
 
+# A block is multi-column when its lines' sorted x0 sequence jumps by more
+# than this fraction of the block's own horizontal extent (min x0 to max x1).
+# The threshold is derived from the block itself — no absolute pixels — so it
+# survives rescaling and different crops. Measured on the salmon's referenced
+# page: intra-column x0 jitter in the sauce block stays under 0.05 of the
+# extent even counting the continuation indent ("(optional)" sits +16 px
+# right of its column), while the jump to the instruction column is 0.37 and
+# the jump to the far-margin tags ("VEGETARIAN", the page number) is 0.52.
+# 0.15 sits well clear of both sides.
+COLUMN_GAP_MIN_FRACTION_OF_EXTENT = 0.15
+
+
+def _split_columns(block: list[TextLine]) -> list[list[TextLine]]:
+    """Cluster one block's lines into print columns, left to right.
+
+    RULE: sort the block's lines by x0; a gap between consecutive x0 values
+    larger than COLUMN_GAP_MIN_FRACTION_OF_EXTENT of the block's horizontal
+    extent starts a new column. Intra-column jitter (including the wrapped-
+    line indent band) is far smaller than a true column gap, and both are
+    measured against the block's own extent, so no absolute pixel threshold
+    is involved. A block with no such gap comes back as a single column.
+    """
+    if len(block) < 2:
+        return [block]
+    extent = max(l.x1 for l in block) - min(l.x0 for l in block)
+    if extent <= 0:
+        return [block]
+    threshold = COLUMN_GAP_MIN_FRACTION_OF_EXTENT * extent
+    ordered = sorted(block, key=lambda l: l.x0)
+    columns: list[list[TextLine]] = [[ordered[0]]]
+    for prev, line in zip(ordered, ordered[1:]):
+        if line.x0 - prev.x0 > threshold:
+            columns.append([])
+        columns[-1].append(line)
+    return columns
+
+
+def _column_texts(column: list[TextLine], image_width: int) -> list[str]:
+    """One column's lines, top to bottom, wrapped continuations joined.
+
+    RULE (same indent signal as _group_ingredient_lines): within a column, a
+    line indented right of the line that started the current entry by between
+    CONTINUATION_INDENT_MIN_FRACTION and CONTINUATION_INDENT_MAX_FRACTION of
+    the image width is a WRAPPED continuation and is joined onto that entry
+    ("(optional)" joins the jalapeño line above it). A numbered step never
+    continues the previous entry, mirroring the main parser's guard.
+    """
+    indent_min = CONTINUATION_INDENT_MIN_FRACTION * image_width
+    indent_max = CONTINUATION_INDENT_MAX_FRACTION * image_width
+    texts: list[str] = []
+    start_x0: float | None = None
+    for line in sorted(column, key=lambda l: (l.y0, l.x0)):
+        indent = line.x0 - start_x0 if start_x0 is not None else None
+        is_continuation = (
+            texts
+            and indent is not None
+            and indent_min <= indent <= indent_max
+            and not STEP_START_RE.match(line.text)
+        )
+        if is_continuation:
+            texts[-1] += " " + line.text
+        else:
+            texts.append(line.text)
+            start_x0 = line.x0
+    return texts
+
+
 def _blocked_text(out: VisionOutput) -> str:
     """The page's text with blank lines at large vertical gaps.
 
@@ -863,8 +930,13 @@ def _blocked_text(out: VisionOutput) -> str:
     on the salmon's referenced page, the 55px gap above the sauce block reads
     as 4px bottom-to-top. Top edges are stable under the same tilt.
 
-    Within a block, lines keep (y, x) order — two-column blocks interleave,
-    which the resolver's quantity/paragraph split tolerates.
+    Within a block, ordering is COLUMN-AWARE: a multi-column block (see
+    _split_columns) emits its columns sequentially, left column top-to-bottom
+    first, so a sub-recipe whose ingredient list and instruction paragraph
+    sit side by side reads as list-then-paragraph instead of row-interleaved.
+    Wrapped lines within a column are joined onto their parent entry (see
+    _column_texts). Single-column blocks come through unchanged, in (y, x)
+    order. Blank lines appear only BETWEEN blocks, never within one.
     """
     lines = sorted(out.lines, key=lambda l: (l.y0, l.x0))
     if len(lines) < 3:
@@ -875,12 +947,23 @@ def _blocked_text(out: VisionOutput) -> str:
         if (d := b.y0 - a.y0) >= _ROW_JITTER_PX
     )
     median_spacing = spacings[len(spacings) // 2] if spacings else 24.0
-    parts: list[str] = [lines[0].text]
+    blocks: list[list[TextLine]] = [[lines[0]]]
     for prev, line in zip(lines, lines[1:]):
         if line.y0 - prev.y0 > BLOCK_GAP_FACTOR * median_spacing:
-            parts.append("")  # block boundary
-        parts.append(line.text)
-    return "\n".join(parts)
+            blocks.append([])  # block boundary
+        blocks[-1].append(line)
+
+    parts: list[str] = []
+    for block in blocks:
+        columns = _split_columns(block)
+        if len(columns) == 1:
+            texts = [l.text for l in block]  # single column: unchanged
+        else:
+            texts = []
+            for column in columns:
+                texts.extend(_column_texts(column, out.image_width))
+        parts.append("\n".join(texts))
+    return "\n\n".join(parts)
 
 
 def _stack_pages(outputs: list[VisionOutput]) -> VisionOutput:

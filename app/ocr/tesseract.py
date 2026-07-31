@@ -184,6 +184,12 @@ INGREDIENT_STOPWORD_STARTS: frozenset[str] = frozenset(
     }
 )
 
+# RULE (dangling joiner): a line ending in one of these words is mid-phrase;
+# the next line continues it ("chopped fresh dill, plus" / "cut into").
+JOINER_END_WORDS: frozenset[str] = frozenset(
+    {"plus", "and", "or", "with", "into", "cut", "for", "of", "the", "a", "an"}
+)
+
 # RULE (unit, leading): the word immediately after the quantity is the unit if
 # it is in this set. Otherwise there is no unit and the whole remainder is the
 # ingredient name ("2 lemons" -> amount "2", unit None, name "lemons").
@@ -361,15 +367,116 @@ def parse_ingredient_line(line: str, order: int) -> IngredientCreate | None:
     return IngredientCreate(name=name, amount=amount, unit=unit, order=order)
 
 
+def _quantityless_ingredient(line: str, order: int) -> IngredientCreate | None:
+    """A quantity-less line admitted by the run rule, or None if it fails the
+    same quality guards a quantity-led name must pass.
+
+    RULE (quantity-less ingredient): inside the ingredient run, a line with no
+    leading quantity is still an ingredient ("Fine pink Himalayan salt and
+    freshly ground pepper") iff it is short enough, contains lowercase
+    letters (rejects small-caps headers), does not start with a function
+    word, and is not cook-info metadata.
+    """
+    stripped = line.strip().strip(" ,;")
+    words = stripped.split()
+    if not words or len(words) > INGREDIENT_MAX_WORDS:
+        return None
+    if not any(ch.islower() for ch in stripped):
+        return None  # small-caps headers ("TOTAL 3 HOURS 15 MINUTES")
+    if SERVINGS_RE.search(stripped) or NOTE_HEADER_RE.match(stripped):
+        return None  # cook-info metadata ("Serves 4") or the NOTE sidebar head
+    if _clean_word(words[0]) in INGREDIENT_STOPWORD_STARTS:
+        return None
+    return IngredientCreate(name=stripped, amount=None, unit=None, order=order)
+
+
 def extract_ingredients(lines: list[str]) -> list[IngredientCreate]:
-    """Apply the ingredient rule to every line before the first numbered step."""
-    ingredients: list[IngredientCreate] = []
+    """Apply the ingredient-run rule to the region before the first step.
+
+    RULE (ingredient run — shared with the sub-recipe block parser, see
+    app/ocr/resolve.py `_find_ingredient_run`): ingredients form one
+    contiguous run in which at least half the lines are quantity-led. A
+    quantity-led line (parse_ingredient_line succeeds) always extends the
+    run; a quantity-less line extends it only when it directly follows a
+    quantity-led line and does not end like prose. Lines inside the run
+    that lack a quantity become ingredients with amount=None — previously
+    they were structurally invisible (salt, pepper, "basil and/or parsley"
+    could never be parsed), a measured recall ceiling on the reference page.
+    """
+    # `_find_ingredient_run` is private to resolve.py; imported anyway so the
+    # run rule has exactly one implementation (same reasoning as the private
+    # photo_service imports in claude.py).
+    from app.ocr.resolve import _find_ingredient_run
+
+    # The run rule is BLOCK-scoped: contiguity only means something within
+    # one visual block (the xycut path joins blocks with blank lines; the
+    # two ingredient sub-columns are separate blocks with OCR junk at the
+    # seam, and a single region-wide run would end at the first column and
+    # drop the second — measured 13/19 -> 8/19 before this was per-block).
+    region_blocks: list[list[str]] = [[]]
     for line in lines:
         if STEP_LINE_RE.match(line.strip()):
             break  # ingredient region ends at the first numbered step
-        parsed = parse_ingredient_line(line, order=len(ingredients))
-        if parsed is not None:
-            ingredients.append(parsed)
+        if line.strip():
+            region_blocks[-1].append(line)
+        elif region_blocks[-1]:
+            region_blocks.append([])  # blank line = block boundary
+
+    ingredients: list[IngredientCreate] = []
+    for block in region_blocks:
+        if not block:
+            continue
+        quantity_led = [
+            parse_ingredient_line(line, order=0) is not None for line in block
+        ]
+        # RULE (quantity-less block): a block with NO quantity-led line at
+        # all can still be an ingredient — xycut crops quantity-less entries
+        # ("Fine pink Himalayan salt and freshly / ground pepper") into
+        # their own micro-blocks. Admitted iff the PREVIOUS block yielded
+        # at least one ingredient (headnote prose blocks precede the first
+        # ingredient block and are thereby rejected). The block's wrapped
+        # lines are joined into ONE candidate entry.
+        if not any(quantity_led):
+            if ingredients:
+                joined = " ".join(l.strip() for l in block)
+                parsed = _quantityless_ingredient(joined, order=len(ingredients))
+                if parsed is not None:
+                    ingredients.append(parsed)
+            continue
+        start, end = _find_ingredient_run(
+            [l.strip() for l in block], quantity_led
+        )
+        block_start_count = len(ingredients)
+        for i in range(start, end):
+            stripped = block[i].strip()
+            if quantity_led[i]:
+                parsed = parse_ingredient_line(block[i], order=len(ingredients))
+                if parsed is not None:
+                    ingredients.append(parsed)
+                continue
+            # RULE (wrapped continuation): inside the run, a quantity-less
+            # line is a CONTINUATION of the entry above it — joined onto its
+            # name, not a new entry — when it starts with a lowercase letter
+            # or punctuation, or the previous line dangles a joiner word
+            # ("...dill, plus" / "...cut into"). This is the text-only
+            # analogue of vision's indent-based wrap joining, and it is what
+            # lets the normalizer's sum rule see "plus 3 whole cloves".
+            prev_dangles = (
+                i > start
+                and _clean_word(block[i - 1].strip().split()[-1]) in JOINER_END_WORDS
+            )
+            is_continuation = (
+                stripped[:1].islower() or not stripped[:1].isalpha() or prev_dangles
+            )
+            if is_continuation and len(ingredients) > block_start_count:
+                prev = ingredients[-1]
+                ingredients[-1] = prev.model_copy(
+                    update={"name": f"{prev.name} {stripped.strip(' ,;')}"}
+                )
+            else:
+                parsed = _quantityless_ingredient(block[i], order=len(ingredients))
+                if parsed is not None:
+                    ingredients.append(parsed)
     return ingredients
 
 

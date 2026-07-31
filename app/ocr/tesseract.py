@@ -40,6 +40,7 @@ import argparse
 import re
 import warnings
 from pathlib import Path
+from typing import Sequence
 
 import cv2
 import numpy as np
@@ -493,7 +494,7 @@ def parse_text(raw_text: str, photo_filename: str) -> PhotoExtractResult:
 
 
 def read(
-    image_path: Path,
+    image_path: Path | Sequence[Path],
     *,
     psm: int = DEFAULT_PSM,
     lang: str = DEFAULT_LANG,
@@ -507,7 +508,11 @@ def read(
     spelled out as keyword arguments so their defaults are visible.
 
     Args:
-        image_path: Path to the photo.
+        image_path: Path to the photo, or an ordered list of paths for a
+            recipe spanning several pages — list order is page order, first
+            page carries the title. Pages are OCR'd separately and their text
+            concatenated in page order before the single parse, so a step
+            that continues across a page break is parsed whole.
         psm: Tesseract page segmentation mode. See DEFAULT_PSM for which values
             are worth trying on a two-column cookbook page.
         lang: Tesseract language pack. Only "eng" is installed here.
@@ -521,19 +526,26 @@ def read(
         pytesseract.TesseractError / TesseractNotFoundError: propagated, so an
             OCR failure is never mistaken for an empty page.
     """
-    image_path = Path(image_path)
-    if not image_path.is_file():
-        raise FileNotFoundError(f"No such image: {image_path}")
-
-    image = _preprocess(image_path) if preprocess else Image.open(image_path)
+    paths = (
+        [Path(p) for p in image_path]
+        if isinstance(image_path, (list, tuple))
+        else [Path(image_path)]
+    )
+    for p in paths:
+        if not p.is_file():
+            raise FileNotFoundError(f"No such image: {p}")
 
     config = f"--oem {oem} --psm {psm}"
     if extra_config:
         config = f"{config} {extra_config}"
 
-    raw_text: str = pytesseract.image_to_string(image, lang=lang, config=config)
+    page_texts: list[str] = []
+    for p in paths:
+        image = _preprocess(p) if preprocess else Image.open(p)
+        page_texts.append(pytesseract.image_to_string(image, lang=lang, config=config))
+    raw_text = "\n\n".join(page_texts)
 
-    schema = parse_text(raw_text, photo_filename=image_path.name)
+    schema = parse_text(raw_text, photo_filename=paths[0].name)
     return Reading(method=METHOD_NAME, schema=schema, raw_text=raw_text)
 
 

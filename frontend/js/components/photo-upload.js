@@ -44,6 +44,11 @@ function createPhotoUpload({ onExtracted, onCancel }) {
   const errorMsg = container.querySelector("#error-message");
 
   let files = [];
+  // Index of the FIRST page of the recipe (the one with the title). Only
+  // meaningful when there are multiple pages; the starred file is moved to
+  // the front of the upload, and the backend treats upload order as page
+  // order with the first file as the title page.
+  let firstPageIndex = 0;
 
   // Browse button opens file picker
   browseBtn.addEventListener("click", () => fileInput.click());
@@ -93,13 +98,19 @@ function createPhotoUpload({ onExtracted, onCancel }) {
 
       const label = document.createElement("span");
       label.className = "thumb-label";
-      label.textContent = `Page ${index + 1}`;
+      label.textContent =
+        files.length > 1 && index === firstPageIndex
+          ? `Page ${index + 1} \u2014 first`
+          : `Page ${index + 1}`;
 
       const removeBtn = document.createElement("button");
       removeBtn.className = "thumb-remove";
       removeBtn.textContent = "\u00d7";
       removeBtn.addEventListener("click", () => {
         files.splice(index, 1);
+        // Keep the star pointing at the same file after removal.
+        if (index === firstPageIndex) firstPageIndex = 0;
+        else if (index < firstPageIndex) firstPageIndex -= 1;
         renderThumbnails();
         scanBtn.classList.toggle("hidden", files.length === 0);
       });
@@ -107,6 +118,22 @@ function createPhotoUpload({ onExtracted, onCancel }) {
       thumb.appendChild(img);
       thumb.appendChild(label);
       thumb.appendChild(removeBtn);
+
+      // Star = "this is the first page (has the title)". Only shown when the
+      // recipe spans multiple photos; with one photo there is nothing to pick.
+      if (files.length > 1) {
+        const starBtn = document.createElement("button");
+        starBtn.className =
+          "thumb-star" + (index === firstPageIndex ? " active" : "");
+        starBtn.textContent = index === firstPageIndex ? "\u2605" : "\u2606";
+        starBtn.title = "Mark as the first page (the one with the title)";
+        starBtn.addEventListener("click", () => {
+          firstPageIndex = index;
+          renderThumbnails();
+        });
+        thumb.appendChild(starBtn);
+      }
+
       thumbnails.appendChild(thumb);
     });
   }
@@ -123,7 +150,13 @@ function createPhotoUpload({ onExtracted, onCancel }) {
 
     try {
       const formData = new FormData();
-      for (const file of files) {
+      // Starred page first; the rest keep their relative order. The backend
+      // treats upload order as page order, first file = title page.
+      const ordered = [
+        files[firstPageIndex],
+        ...files.filter((_, i) => i !== firstPageIndex),
+      ];
+      for (const file of ordered) {
         formData.append("photos", file);
       }
 

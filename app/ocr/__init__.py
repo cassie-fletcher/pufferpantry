@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import importlib
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from app.ocr.base import Reading
 
@@ -32,8 +32,15 @@ _MODULES: dict[str, str] = {
 METHODS: tuple[str, ...] = tuple(_MODULES)
 
 
-def read_image(image_path: str | Path, *, method: str, **opts: Any) -> Reading:
-    """Read `image_path` with `method` and return the parsed recipe.
+def read_image(
+    image_path: str | Path | Sequence[str | Path], *, method: str, **opts: Any
+) -> Reading:
+    """Read one image — or an ordered list of pages — and return the recipe.
+
+    A list means one recipe spanning several pages: list order is page order,
+    and the FIRST entry is the page with the title. Each method handles the
+    combination its own way (local engines OCR per page and parse the joined
+    result; claude sends all pages in one message). Always one Reading out.
 
     `method` is required rather than defaulted — picking a winner is a decision
     for the caller to make explicitly, not something this function does quietly.
@@ -48,12 +55,21 @@ def read_image(image_path: str | Path, *, method: str, **opts: Any) -> Reading:
             f"unknown method {method!r}. Available: {', '.join(METHODS)}"
         )
 
-    path = Path(image_path)
-    if not path.is_file():
-        raise FileNotFoundError(f"no such image: {path}")
+    if isinstance(image_path, (list, tuple)):
+        pages = [Path(p) for p in image_path]
+        if not pages:
+            raise ValueError("image_path list is empty")
+        for p in pages:
+            if not p.is_file():
+                raise FileNotFoundError(f"no such image: {p}")
+        arg: Path | list[Path] = pages if len(pages) > 1 else pages[0]
+    else:
+        arg = Path(image_path)
+        if not arg.is_file():
+            raise FileNotFoundError(f"no such image: {arg}")
 
     module = importlib.import_module(_MODULES[method])
-    reading = module.read(path, **opts)
+    reading = module.read(arg, **opts)
 
     # The dispatch table and the module's own METHOD_NAME must agree, or a
     # voter counting by `reading.method` would mis-attribute results.

@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Sequence
 
 from anthropic import Anthropic
 from anthropic.types import Message
@@ -106,7 +107,7 @@ VALID_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 
 def read(
-    image_path: Path,
+    image_path: Path | Sequence[Path],
     *,
     model: str | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
@@ -122,10 +123,12 @@ def read(
     that does.
 
     Args:
-        image_path: Path to the photo. One image per call — the reader contract
-            is one `Reading` per image. (Production's
-            `extract_recipe_from_photos` accepts several pages at once; that
-            multi-page path is not modelled here.)
+        image_path: Path to the photo, or an ordered list of paths for a
+            recipe spanning several pages — list order is page order, first
+            page carries the title. All pages go as image blocks in ONE
+            message (the same shape production's `extract_recipe_from_photos`
+            sends), plus an instruction that they are consecutive pages of a
+            single recipe, so the model cannot split them into two recipes.
         model: Anthropic model id. Defaults to
             `settings.claude_model_extraction` (app/config.py). Pass explicitly
             only to sweep models; do not hardcode one at a call site.
@@ -158,9 +161,14 @@ def read(
             mismatch is a real finding about the model's output and must not
             be smoothed over.
     """
-    image_path = Path(image_path)
-    if not image_path.is_file():
-        raise FileNotFoundError(f"No such image: {image_path}")
+    paths = (
+        [Path(p) for p in image_path]
+        if isinstance(image_path, (list, tuple))
+        else [Path(image_path)]
+    )
+    for p in paths:
+        if not p.is_file():
+            raise FileNotFoundError(f"No such image: {p}")
 
     # Fail loudly and early on a missing key. No env-var fallback, no
     # interactive prompt, no partial result — the caller is asking for a paid
@@ -172,12 +180,13 @@ def read(
             "works offline and needs no key.)"
         )
 
-    suffix = image_path.suffix.lower()
-    if suffix not in MEDIA_TYPES:
-        raise ValueError(
-            f"{image_path.name}: unsupported image type {suffix!r}. "
-            f"The API accepts {sorted(MEDIA_TYPES)}."
-        )
+    for p in paths:
+        suffix = p.suffix.lower()
+        if suffix not in MEDIA_TYPES:
+            raise ValueError(
+                f"{p.name}: unsupported image type {suffix!r}. "
+                f"The API accepts {sorted(MEDIA_TYPES)}."
+            )
 
     if effort is not None and effort not in VALID_EFFORTS:
         raise ValueError(f"effort must be one of {VALID_EFFORTS}, got {effort!r}")
@@ -187,10 +196,19 @@ def read(
     # import time and silently ignore a later change.
     model = model or settings.claude_model_extraction
 
-    content = _build_image_content([image_path])
-    content.append(
-        {"type": "text", "text": EXTRACTION_PROMPT if prompt is None else prompt}
-    )
+    content = _build_image_content(paths)
+    prompt_text = EXTRACTION_PROMPT if prompt is None else prompt
+    if len(paths) > 1:
+        # Kill the prompt's "pages may contain multiple distinct recipes"
+        # escape hatch: multiple uploads are BY CONTRACT one recipe (owner's
+        # rule), and the first image is the page with the title.
+        prompt_text += (
+            f"\n\nIMPORTANT: The {len(paths)} images above are consecutive "
+            "pages of ONE single recipe, in reading order. The FIRST image "
+            "is the first page and contains the recipe title. Do not return "
+            "them as separate recipes."
+        )
+    content.append({"type": "text", "text": prompt_text})
 
     # Client construction is cheap and performs no I/O; the request below is
     # the network call.
@@ -212,13 +230,13 @@ def read(
         message.stop_reason,
         message.usage.input_tokens,
         message.usage.output_tokens,
-        image_path.name,
+        ", ".join(p.name for p in paths),
     )
 
     raw_text = _extract_response_text(message)
-    logger.debug("claude reader raw response for %s:\n%s", image_path.name, raw_text)
+    logger.debug("claude reader raw response for %s:\n%s", paths[0].name, raw_text)
 
-    schema = _to_schema(raw_text, photo_filename=image_path.name)
+    schema = _to_schema(raw_text, photo_filename=paths[0].name)
     # Parsing lives in each reader; each reader opts into the shared
     # normalization (app/ocr/normalize.py) at its own boundary.
     schema.ingredients = normalize_ingredients(schema.ingredients)

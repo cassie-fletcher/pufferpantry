@@ -91,7 +91,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from app.ocr.base import Reading
 from app.ocr.normalize import normalize_ingredients
@@ -776,8 +776,50 @@ def parse_lines(vision: VisionOutput, photo_filename: str) -> PhotoExtractResult
 # --- Public entry point -----------------------------------------------------
 
 
-def read(image_path: Path, **opts: Any) -> Reading:
-    """Recognize text in `image_path` with Apple Vision and parse it.
+# Vertical white gap inserted between stacked pages, in pixels. Big enough
+# that no line-grouping heuristic can mistake the junction for a wrapped
+# line; otherwise arbitrary.
+PAGE_STACK_GAP = 40.0
+
+
+def _stack_pages(outputs: list[VisionOutput]) -> VisionOutput:
+    """Combine per-page outputs by stacking pages vertically.
+
+    Page 2's lines get their y coordinates offset by page 1's height (plus a
+    gap), as if the pages were laid out one above the other on a single tall
+    page. The geometry-based parser then reads them in page order, and a step
+    that continues across the page break is seen as consecutive lines.
+
+    Assumes similar framing across pages (the indent-based wrap detection
+    compares x positions between pages' lines only within a line run, but a
+    grossly different crop between pages could still skew it). Untested
+    against a real two-page recipe until the salmon ground truth exists.
+    """
+    from dataclasses import replace
+
+    lines: list[TextLine] = []
+    y_offset = 0.0
+    for out in outputs:
+        lines.extend(
+            replace(line, y0=line.y0 + y_offset, y1=line.y1 + y_offset)
+            for line in out.lines
+        )
+        y_offset += out.image_height + PAGE_STACK_GAP
+    return VisionOutput(
+        lines=tuple(lines),
+        image_width=max(o.image_width for o in outputs),
+        image_height=int(y_offset - PAGE_STACK_GAP),
+        options=outputs[0].options,
+    )
+
+
+def read(image_path: Path | Sequence[Path], **opts: Any) -> Reading:
+    """Recognize text with Apple Vision and parse it.
+
+    `image_path` is one path, or an ordered list of paths for a recipe that
+    spans several pages — list order is page order, first page carries the
+    title. Pages are OCR'd separately and stacked (see _stack_pages), then
+    parsed once.
 
     Options are either Vision options forwarded to the Swift shim
     (`recognitionLevel`, `usesLanguageCorrection`, `recognitionLanguages`,
@@ -786,10 +828,17 @@ def read(image_path: Path, **opts: Any) -> Reading:
 
     Raises VisionBinaryError if the shim is missing — run `swift/build.sh`.
     """
-    image_path = Path(image_path)
-    vision = read_lines(image_path, **opts)
-    raw_text = "\n".join(line.text for line in vision.lines)
-    schema = parse_lines(vision, photo_filename=image_path.name)
+    paths = (
+        [Path(p) for p in image_path]
+        if isinstance(image_path, (list, tuple))
+        else [Path(image_path)]
+    )
+    outputs = [read_lines(p, **opts) for p in paths]
+    vision = outputs[0] if len(outputs) == 1 else _stack_pages(outputs)
+    raw_text = "\n\n".join(
+        "\n".join(line.text for line in out.lines) for out in outputs
+    )
+    schema = parse_lines(vision, photo_filename=paths[0].name)
     return Reading(method=METHOD_NAME, schema=schema, raw_text=raw_text or None)
 
 

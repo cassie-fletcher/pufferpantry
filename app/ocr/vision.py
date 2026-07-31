@@ -94,6 +94,7 @@ from pathlib import Path
 from typing import Any
 
 from app.ocr.base import Reading
+from app.ocr.normalize import normalize_ingredients
 from app.schemas.recipe import IngredientCreate, PhotoExtractResult
 
 logger = logging.getLogger(__name__)
@@ -760,7 +761,9 @@ def parse_lines(vision: VisionOutput, photo_filename: str) -> PhotoExtractResult
         "title": title,
         "instructions": instructions,
         "notes": notes,
-        "ingredients": ingredients,
+        # Parsing lives in each reader; each reader opts into the shared
+        # normalization (app/ocr/normalize.py) at its own boundary.
+        "ingredients": normalize_ingredients(ingredients),
         "photo_filename": photo_filename,
     }
     if servings is not None:

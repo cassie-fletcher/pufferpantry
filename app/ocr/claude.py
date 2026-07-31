@@ -63,6 +63,7 @@ from pydantic import ValidationError
 
 from app.config import settings
 from app.ocr.base import Reading
+from app.ocr.normalize import normalize_ingredients
 from app.schemas.recipe import PhotoExtractResult
 
 # `_build_image_content` and `_parse_claude_json` are private to photo_service
@@ -218,6 +219,9 @@ def read(
     logger.debug("claude reader raw response for %s:\n%s", image_path.name, raw_text)
 
     schema = _to_schema(raw_text, photo_filename=image_path.name)
+    # Parsing lives in each reader; each reader opts into the shared
+    # normalization (app/ocr/normalize.py) at its own boundary.
+    schema.ingredients = normalize_ingredients(schema.ingredients)
     return Reading(method=METHOD_NAME, schema=schema, raw_text=raw_text)
 
 

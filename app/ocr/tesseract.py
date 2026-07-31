@@ -47,6 +47,7 @@ import pytesseract
 from PIL import Image
 
 from app.ocr.base import Reading
+from app.ocr.normalize import normalize_ingredients
 from app.schemas.recipe import IngredientCreate, PhotoExtractResult
 
 # --------------------------------------------------------------------------
@@ -471,6 +472,10 @@ def parse_text(raw_text: str, photo_filename: str) -> PhotoExtractResult:
     instructions = (
         "\n\n".join(f"{number}. {text}" for number, text in steps) if steps else None
     )
+
+    # Parsing lives in each reader; each reader opts into the shared
+    # normalization (app/ocr/normalize.py) at its own boundary.
+    ingredients = normalize_ingredients(ingredients)
 
     return PhotoExtractResult(
         title=title,

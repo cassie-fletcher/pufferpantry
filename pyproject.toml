@@ -28,6 +28,13 @@ dependencies = [
     # Image handling
     "pillow>=10.2",
 
+    # Local OCR readers (app/ocr): tesseract binding + image ops for the
+    # XY-cut segmentation. The tesseract CLI itself is a system install
+    # (brew install tesseract), not a pip dependency.
+    "pytesseract>=0.3.13",
+    "opencv-python>=4.13",
+    "numpy>=2.4",
+
     # HTTP client (for USDA nutrition API)
     "httpx>=0.27",
 ]
@@ -37,6 +44,10 @@ dev = [
     "pytest>=8.0",
     "httpx>=0.27",
     "ruff>=0.2",
+
+    # scripts/: ground-truth files + the --check-gt name cross-check
+    "pyyaml>=6.0",
+    "parse-ingredients>=0.0.4",
 ]
 
 [tool.setuptools.packages.find]

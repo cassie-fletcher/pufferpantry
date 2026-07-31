@@ -16,7 +16,7 @@ module, every page after the first is classified:
       before (tesseract: text concatenation; vision: geometric stacking).
 
 Merge shape (existing production conventions from the Claude extraction
-prompt): block ingredients get ``group="<Heading As Printed, Title-Cased>"``;
+prompt): block ingredients get ``group="<heading as printed>"``;
 block instructions are appended to ``schema.instructions`` as
 ``"\\n\\n--- <Group> ---\\n<text>"``; the referencing ingredient line stays in
 Main untouched.
@@ -158,13 +158,9 @@ def _name_head(name: str) -> str:
     return re.split(r"[,(]", name, maxsplit=1)[0]
 
 
-def _title_case(text: str) -> str:
-    """"GODDESS SAUCE" -> "Goddess Sauce". Word-by-word, apostrophe-safe."""
-    return " ".join(w[:1].upper() + w[1:].lower() for w in text.split())
-
-
 def is_heading(line: str) -> bool:
-    """The heading-shape rule (see HEADING_MAX_WORDS and friends)."""
+    """ALL-CAPS or Title-Case short line — used by parse_block to drop
+    metadata lines ("MAKES ABOUT 1 1/2 CUPS") from a block's instructions."""
     stripped = line.strip()
     if not stripped:
         return False
@@ -178,8 +174,6 @@ def is_heading(line: str) -> bool:
     letter_words = [w for w in words if any(ch.isalpha() for ch in w)]
     if not letter_words:
         return False
-    # ALL-CAPS or Title Case: every word containing a letter must start
-    # (at its first letter) with an uppercase letter.
     for word in letter_words:
         first_letter = next(ch for ch in word if ch.isalpha())
         if not first_letter.isupper():
@@ -221,57 +215,64 @@ def _same_heading(a: str, b: str) -> bool:
 # --------------------------------------------------------------------------
 
 
+def split_blocks(page_text: str) -> list[str]:
+    """Split page text into blocks at blank lines.
+
+    Cassie's blocking model (2026-07-31): main-recipe content sits in the
+    upper blocks; a sub-recipe is a SEPARATE block set off by substantial
+    white space. Readers encode that white space as blank lines — tesseract's
+    xycut path already joins its layout blocks with blank lines, and the
+    vision reader inserts one wherever the vertical gap between lines is
+    large (see vision._blocked_text). A text-only fallback (plain psm-3
+    output) gets paragraph breaks, which is coarser but the same idea.
+    """
+    blocks = [b for b in re.split(r"\n\s*\n", page_text) if b.strip()]
+    return blocks
+
+
 @dataclass(frozen=True)
 class Match:
-    """A heading on an extra page that names a main-list ingredient."""
+    """A lower block on an extra page that names a main-list ingredient."""
 
     ingredient_index: int  # index into the ingredient list that was searched
-    heading_line_index: int  # index into page_text.splitlines()
-    heading: str  # the heading line as printed, stripped
-    group: str  # the heading, Title-Cased — the merge group name
+    block_index: int  # index into split_blocks(page_text)
+    heading: str  # the block's opening line as printed, stripped
+    group: str  # the heading as printed — the merge group name
 
 
 def find_reference(
     ingredients: list[IngredientCreate], page_text: str
 ) -> Match | None:
-    """First heading in `page_text` that matches an ingredient's name head.
+    """The lower block whose OPENING LINE names a main-list ingredient.
 
-    Scans lines top to bottom; the first heading-shaped line that matches any
-    ingredient wins. None when the page references nothing (a continuation).
+    RULE (Cassie's blocking model): candidate blocks are every block after
+    the first — the top of a page is its own recipe's content, a sub-recipe
+    lives in a visually separated block below. A block is the sub-recipe iff
+    its first non-empty line (a) is not quantity-led (an ingredient line is
+    never a heading — measured false positive) and (b) matches an ingredient
+    name's head under the fuzzy rule. No match on any block -> the page is a
+    continuation, or the lower blocks are just notes for that page's recipe.
     """
-    lines = page_text.splitlines()
-    for line_index, line in enumerate(lines):
-        if not is_heading(line):
+    blocks = split_blocks(page_text)
+    for block_index, block in enumerate(blocks[1:], start=1):
+        first = next((l.strip() for l in block.splitlines() if l.strip()), "")
+        if not first:
             continue
+        if _QUANTITY_RE.match(_normalize_fractions(first)):
+            continue  # an ingredient line is never a heading
+        if len(first.split()) > HEADING_MAX_WORDS:
+            continue  # sub-recipe blocks open with their name, not prose
         for ingredient_index, ingredient in enumerate(ingredients):
-            if _heading_matches_ingredient(line, ingredient.name):
-                stripped = line.strip()
-                group = _title_case(stripped.strip(_EDGE_PUNCT + " "))
+            if _heading_matches_ingredient(first, ingredient.name):
+                # Group is the heading AS PRINTED (Cassie's ruling: the name
+                # of the thing, in the page's own casing) — not re-cased.
                 return Match(
                     ingredient_index=ingredient_index,
-                    heading_line_index=line_index,
-                    heading=stripped,
-                    group=group,
+                    block_index=block_index,
+                    heading=first,
+                    group=first.strip(_EDGE_PUNCT + " "),
                 )
     return None
-
-
-def extract_block(page_text: str, heading_line_index: int) -> str:
-    """The block from the heading line to the next foreign heading.
-
-    RULE: the block runs from `heading_line_index` to the line before the
-    next heading-shaped line that does NOT name the same thing as the block's
-    own heading, or to the end of the page. (The common case on real pages:
-    the referenced block sits at the bottom, so end-of-page terminates it.)
-    """
-    lines = page_text.splitlines()
-    heading = lines[heading_line_index]
-    end = len(lines)
-    for i in range(heading_line_index + 1, len(lines)):
-        if is_heading(lines[i]) and not _same_heading(lines[i], heading):
-            end = i
-            break
-    return "\n".join(lines[heading_line_index:end])
 
 
 def parse_block(
@@ -293,6 +294,10 @@ def parse_block(
         if not stripped:
             continue
         if is_heading(stripped):
+            continue
+        # The block's own (possibly lowercase) heading is metadata, not
+        # instructions — "goddess sauce" opening its own block.
+        if _same_heading(stripped, group):
             continue
         match = _QUANTITY_RE.match(_normalize_fractions(stripped))
         if match:
@@ -341,7 +346,7 @@ def resolve_references(
         if match is None:
             continuations.append(page_index)
             continue
-        block = extract_block(page_text, match.heading_line_index)
+        block = split_blocks(page_text)[match.block_index]
         block_ingredients, block_instructions = parse_block(
             block, group=match.group
         )

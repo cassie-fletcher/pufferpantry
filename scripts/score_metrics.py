@@ -149,6 +149,40 @@ def to_decimal(text: str | None) -> float | None:
     return total if seen else None
 
 
+def quantity_values(q) -> list[float] | None:
+    """GT quantity -> endpoint decimals, or None when non-numeric/empty.
+
+    Accepts a scalar string ("1.5") or, for printed ranges ("1 to 2
+    teaspoons"), a list (["1", "2"]) — Cassie's ruling 2026-07-31: ranges are
+    stored as lists so formatting stays undecided.
+    """
+    if q is None or q == "" or q == []:
+        return None
+    if isinstance(q, (list, tuple)):
+        vals = [to_decimal(str(x)) for x in q]
+        return None if any(v is None for v in vals) else [v for v in vals]
+    v = to_decimal(str(q))
+    return None if v is None else [v]
+
+
+# Splits a parsed amount string into range endpoints: "1-2", "1 to 2", "4-6".
+_AMOUNT_RANGE_RE = re.compile(r"\s*(?:-|–|—|\bto\b)\s*", re.IGNORECASE)
+
+
+def amount_values(a: str | None) -> list[float] | None:
+    """Parsed amount string -> endpoint decimals ("1 to 2" -> [1.0, 2.0])."""
+    if not a:
+        return None
+    whole = to_decimal(a)
+    if whole is not None:  # plain value, incl. "1 1/2" (no range separator)
+        return [whole]
+    parts = [p for p in _AMOUNT_RANGE_RE.split(a.strip()) if p]
+    if len(parts) < 2:
+        return None
+    vals = [to_decimal(p) for p in parts]
+    return None if any(v is None for v in vals) else vals
+
+
 def _norm_text(s: str) -> str:
     """Lowercase, collapse whitespace, strip edge punctuation per token.
 
@@ -170,20 +204,30 @@ def numeric_tokens(text: str) -> Counter[str]:
     return Counter(_NUMERIC_TOKEN_RE.findall(text))
 
 
-def split_numbered_steps(instructions: str | None) -> dict[int, str]:
-    """Split an instructions blob into {printed_number: step_text}.
+# Sub-recipe instruction sections are delimited "--- Name ---" (the
+# production convention the resolver also emits).
+_SECTION_HEADER_RE = re.compile(r"(?m)^\s*-{2,}\s*(.+?)\s*-{2,}\s*$")
 
-    Accepts both "1. text" and "1.) text" markers at line starts. Printed
+
+def split_numbered_steps(instructions: str | None) -> dict[tuple[str, int], str]:
+    """Split an instructions blob into {(section, printed_number): step_text}.
+
+    Section is "" for the main recipe, else the normalized "--- Name ---"
+    header text. Keys carry the section so a sub-recipe restarting its
+    numbering at 1 cannot collide with the main recipe's step 1. Printed
     numbers are preserved as-is — a method that drops a step number should
     show a hole here, not a silently renumbered list.
     """
     if not instructions:
         return {}
-    parts = re.split(r"(?m)^\s*(\d+)[.)]+\s*", instructions)
-    # parts = [preamble, num, text, num, text, ...]
-    steps: dict[int, str] = {}
-    for i in range(1, len(parts) - 1, 2):
-        steps[int(parts[i])] = parts[i + 1].strip()
+    steps: dict[tuple[str, int], str] = {}
+    # Split into section chunks first; chunk 0 is the main recipe.
+    chunks = _SECTION_HEADER_RE.split(instructions)
+    for c in range(0, len(chunks), 2):
+        section = _norm_text(chunks[c - 1]) if c else ""
+        parts = re.split(r"(?m)^\s*(\d+)[.)]+\s*", chunks[c])
+        for i in range(1, len(parts) - 1, 2):
+            steps[(section, int(parts[i]))] = parts[i + 1].strip()
     return steps
 
 
@@ -242,6 +286,14 @@ def _ing_name_sim(gt_item: str, parsed_name: str) -> float:
     return score
 
 
+def _norm_group(entry: dict) -> str:
+    """Normalized group; missing/empty means Main. Pairing is restricted to
+    same-group pairs so an ingredient appearing in both the main recipe and a
+    sub-recipe (cumin in salmon AND its sauce) is always scored against its
+    own group's entry — the duplicate entries are correct data, never merged."""
+    return _norm_text(entry.get("group") or "Main") or "main"
+
+
 def match_ingredients(
     gt_ings: list[dict], parsed_ings: list[dict]
 ) -> list[tuple[int, int, float]]:
@@ -250,6 +302,7 @@ def match_ingredients(
         (i, j, _ing_name_sim(g.get("item") or "", p.get("name") or ""))
         for i, g in enumerate(gt_ings)
         for j, p in enumerate(parsed_ings)
+        if _norm_group(g) == _norm_group(p)
     ]
     candidates.sort(key=lambda t: (-t[2], t[0], t[1]))  # deterministic
     used_gt: set[int] = set()
@@ -271,11 +324,15 @@ def score_ingredients(gt_ings: list[dict], parsed_ings: list[dict]) -> Ingredien
     for i, j, s in pairs:
         gt, p = gt_ings[i], parsed_ings[j]
         sims.append(s)
-        gt_q = to_decimal(gt.get("quantity"))
-        if gt_q is not None:  # GT non-numeric ("to taste") pairs are skipped
+        gt_vals = quantity_values(gt.get("quantity"))
+        if gt_vals is not None:  # GT non-numeric ("to taste") pairs are skipped
             q_n += 1
-            p_q = to_decimal(p.get("amount"))
-            if p_q is not None and abs(p_q - gt_q) < 1e-9:
+            p_vals = amount_values(p.get("amount"))
+            # DECISION (v0): a range is correct only when BOTH endpoints are
+            # reproduced — a method reading "1 to 2" as just "1" half-read it.
+            if p_vals is not None and len(p_vals) == len(gt_vals) and all(
+                abs(a - b) < 1e-9 for a, b in zip(sorted(p_vals), sorted(gt_vals))
+            ):
                 q_ok += 1
         gt_u = _norm_text(gt.get("unit") or "")
         if gt_u:
@@ -314,13 +371,14 @@ def score_steps(gt_steps: list[dict], instructions: str | None) -> StepScore:
     missing: list[int] = []
     for step in gt_steps:
         n, gt_text = int(step["number"]), step["text"]
-        if n not in parsed:
+        key = (_norm_text(step.get("section") or ""), n)
+        if key not in parsed:
             missing.append(n)
             continue
-        wers.append(wer(gt_text, parsed[n]))
+        wers.append(wer(gt_text, parsed[key]))
         gt_nums = numeric_tokens(gt_text)
         num_total += sum(gt_nums.values())
-        num_found += sum((gt_nums & numeric_tokens(parsed[n])).values())
+        num_found += sum((gt_nums & numeric_tokens(parsed[key])).values())
     return StepScore(
         mean_wer=sum(wers) / len(wers) if wers else 1.0,
         numeric_recall=num_found / num_total if num_total else 1.0,
@@ -420,18 +478,33 @@ def lint_ground_truth(gt: dict) -> list[str]:
         if not (ing.get("item") or "").strip():
             problems.append(f"ingredient[{n}]: empty item")
         q = ing.get("quantity", "")
-        if q and to_decimal(q) is None:
+        if q and quantity_values(q) is None:
             problems.append(
                 f"ingredient[{n}] ({ing.get('item')!r}): quantity {q!r} is neither "
-                "empty nor decimal-parseable"
+                "empty, decimal-parseable, nor a list of decimals (range)"
             )
-    numbers = [int(s["number"]) for s in gt.get("steps") or [] if "number" in s]
-    expected = list(range(1, len(numbers) + 1))
-    if numbers != expected:
-        problems.append(f"step numbers {numbers} != consecutive {expected}")
-    items = [_norm_text(i.get("item") or "") for i in gt.get("ingredients") or []]
+    # Step numbering is checked PER SECTION: a sub-recipe legitimately
+    # restarts at 1 (section field marks it).
+    by_section: dict[str, list[int]] = {}
+    for s in gt.get("steps") or []:
+        if "number" in s:
+            by_section.setdefault(_norm_text(s.get("section") or ""), []).append(
+                int(s["number"])
+            )
+    for section, numbers in by_section.items():
+        expected = list(range(1, len(numbers) + 1))
+        if numbers != expected:
+            label = f" (section {section!r})" if section else ""
+            problems.append(f"step numbers{label} {numbers} != consecutive {expected}")
+    # Duplicates are checked PER GROUP: the same ingredient in Main and in a
+    # sub-recipe is correct data (cumin in the salmon AND its sauce), and the
+    # entries stay separate so quantities remain per-group.
+    items = [
+        (_norm_group(i), _norm_text(i.get("item") or ""))
+        for i in gt.get("ingredients") or []
+    ]
     for dup in {i for i in items if items.count(i) > 1}:
-        problems.append(f"duplicate ingredient item: {dup!r}")
+        problems.append(f"duplicate ingredient item in group {dup[0]!r}: {dup[1]!r}")
     return problems
 
 
@@ -450,9 +523,10 @@ def check_ingredient_names(gt: dict) -> list[str]:
 
     flags: list[str] = []
     for n, ing in enumerate(gt.get("ingredients") or []):
-        line = " ".join(
-            p for p in (ing.get("quantity"), ing.get("unit"), ing.get("item")) if p
-        )
+        quantity = ing.get("quantity")
+        if isinstance(quantity, (list, tuple)):  # range ruling: stored as list
+            quantity = "-".join(str(x) for x in quantity)
+        line = " ".join(p for p in (quantity, ing.get("unit"), ing.get("item")) if p)
         if ing.get("prep"):
             line += f", {ing['prep']}"
         try:

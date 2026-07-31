@@ -86,6 +86,8 @@ script") underpins all of the above.
 
 - [ ] **Combine OCR methods (ROVER).** Goal: combine several independent local readings of a recipe photo into one better result, with **no LLM/API calls in the ensemble**. Reading layer exists: `app/ocr/read_image(path, method=...)` with `tesseract`, `apple_vision`, `claude` (claude built but deliberately unused). Combination not designed yet — deferred by Cassie until metrics are settled. An earlier Claude-model-voter design (Sonnet voter, confidence averaging) was considered and **rejected**; do not resurrect it from old notes.
 
+- [ ] **Shopping list: group-aware consolidation.** `shopping_service` merges same-named ingredients group-blind. With sub-recipe groups (e.g. cumin in both a main recipe and its sauce), the list must support "bought the sub-recipe ready-made → subtract its group's ingredients" (Cassie, 2026-07-31).
+
 ### Code cleanup
 - [ ] "Step" is overloaded in photo_service.py — means both extraction pipeline stages and recipe cooking steps. Rename to disambiguate.
 - [ ] Validate Claude's JSON response against a Pydantic schema after `_parse_claude_json` (line ~351). Currently no check that required fields exist or have correct types.

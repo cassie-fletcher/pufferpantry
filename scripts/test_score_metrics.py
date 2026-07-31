@@ -270,9 +270,56 @@ def test_servings_range_membership() -> None:
 
 
 def test_step_split_accepts_both_marker_styles() -> None:
-    assert split_numbered_steps("1. a\n2.) b") == {1: "a", 2: "b"}
+    assert split_numbered_steps("1. a\n2.) b") == {("", 1): "a", ("", 2): "b"}
 
 
 def test_wer_identity_and_scale() -> None:
     assert wer("a b c", "a b c") == 0.0
     assert wer("a b c", "a x c") == pytest.approx(1 / 3)
+
+
+# ---------------------------------------------------------------------------
+# Multi-section / group / range extensions (rulings 2026-07-31).
+# ---------------------------------------------------------------------------
+
+from score_metrics import amount_values, quantity_values  # noqa: E402
+
+
+def test_range_quantity_list_matches_both_endpoints() -> None:
+    gt = [{"quantity": ["1", "2"], "unit": "teaspoons", "item": "pepper flakes"}]
+    right = [{"amount": "1 to 2", "unit": "teaspoons", "name": "pepper flakes"}]
+    half = [{"amount": "1", "unit": "teaspoons", "name": "pepper flakes"}]
+    assert score_ingredients(gt, right)["quantity_acc"] == 1.0
+    assert score_ingredients(gt, half)["quantity_acc"] == 0.0  # half-read the range
+
+
+def test_quantity_values_forms() -> None:
+    assert quantity_values(["1", "2"]) == [1.0, 2.0]
+    assert quantity_values("1.5") == [1.5]
+    assert quantity_values("") is None
+    assert amount_values("1-2") == [1.0, 2.0]
+    assert amount_values("1 1/2") == [1.5]
+
+
+def test_same_item_in_two_groups_pairs_within_group() -> None:
+    gt = [
+        {"quantity": "2", "unit": "teaspoons", "item": "ground cumin", "group": "Main"},
+        {"quantity": "1", "unit": "teaspoon", "item": "ground cumin", "group": "goddess sauce"},
+    ]
+    parsed = [
+        {"amount": "2", "unit": "teaspoons", "name": "ground cumin", "group": "Main"},
+        {"amount": "1", "unit": "teaspoon", "name": "ground cumin", "group": "goddess sauce"},
+    ]
+    s = score_ingredients(gt, parsed)
+    # Cross-group pairing would score one quantity wrong; within-group both pass.
+    assert s["n_matched"] == 2 and s["quantity_acc"] == 1.0
+
+
+def test_sectioned_steps_do_not_collide() -> None:
+    gt_steps = [
+        {"number": 1, "text": "Roast the salmon."},
+        {"number": 1, "text": "Blend the sauce.", "section": "goddess sauce"},
+    ]
+    instructions = "1. Roast the salmon.\n\n--- goddess sauce ---\n1. Blend the sauce."
+    s = score_steps(gt_steps, instructions)
+    assert s["n_aligned"] == 2 and s["mean_wer"] == 0.0

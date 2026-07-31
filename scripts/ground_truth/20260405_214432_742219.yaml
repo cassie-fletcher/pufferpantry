@@ -100,7 +100,7 @@ ingredients:
     notes: ""
     group: "Main"          # only needed when not Main
 
-  - quantity: "1-2"
+  - quantity: ["1", "2"]   # printed "1 to 2" — range stored as list (ruling 2026-07-31)
     unit: "teaspoon"
     item: "crushed red pepper flakes"
     prep: ""
@@ -154,56 +154,56 @@ ingredients:
     item: "avocado"
     prep: "halved and pitted"
     notes: ""
-    group: "sub-recipe"          # only needed when not Main
+    group: "goddess sauce"          # only needed when not Main
 
   - quantity: "1"
     unit: ""
     item: "jalapeno"
     prep: "halved and seeded"
     notes: "optional"
-    group: "sub-recipe"          # only needed when not Main
+    group: "goddess sauce"          # only needed when not Main
 
   - quantity: "1/4"
     unit: "cup"
     item: "plain Green yogurt"
     prep: ""
     notes: ""
-    group: "sub-recipe"          # only needed when not Main
+    group: "goddess sauce"          # only needed when not Main
 
   - quantity: "1"
     unit: ""
     item: "lemon"
     prep: "juiced"
     notes: ""
-    group: "sub-recipe"          # only needed when not Main
+    group: "goddess sauce"          # only needed when not Main
 
   - quantity: "1"
     unit: "cup"
     item: "cilantro"
     prep: ""
     notes: "fresh"
-    group: "sub-recipe"          # only needed when not Main
+    group: "goddess sauce"          # only needed when not Main
 
   - quantity: "1/2"
     unit: "cup"
     item: "basil"
     prep: ""
     notes: "fresh leaves"
-    group: "sub-recipe"          # only needed when not Main
+    group: "goddess sauce"          # only needed when not Main
 
   - quantity: "1"
     unit: "teaspoon"
     item: "ground cumin"
     prep: ""
     notes: ""
-    group: "sub-recipe"          # only needed when not Main
+    group: "goddess sauce"          # only needed when not Main
 
   - quantity: ""
     unit: ""
     item: "salt"
     prep: ""
     notes: "Fine pink Himalayan salt"
-    group: "sub-recipe"          # only needed when not Main
+    group: "goddess sauce"          # only needed when not Main
   
 
 cook_info:
@@ -227,16 +227,16 @@ steps:
     # section: ""            # only for a separately-numbered sub-recipe block
   - number: 1
     text: "In a blender or food processor, combine the avocado, jalapeno (if using), yogurt, lemon juice, cilantro, basil, cumin, a pinch of salt and 1 tablespoon of water."
-    section: "sub-recipe"
+    section: "goddess sauce"
   - number: 2
     text: "Blend until smooth and creamy, adding water 1 tablespoon at a time, as needed, to thin the sauce."
-    section: "sub-recipe"
+    section: "goddess sauce"
   - number: 3
     text: "Taste and add more salt as needed."
-    section: "sub-recipe"
+    section: "goddess sauce"
   - number: 4
     text: "Store refridgerated in an airtight container for up to 1 week."
-    section: "sub-recipe"
+    section: "goddess sauce"
 
 notes_sidebar: "In the dead of winter, I gravitate toward all those cozy pasta and pizza and short rib and roast chicken recipes I love so much. Sometime midseason, I realize I am cooking the same dishes over and over again. And that's when I think about what I haven't made in a while. To get out of that rut, more times than not I turn to this slow-roasted salmon. It's just the right combination of light and healthy, but still super cozy. Slow-roasting the salmon really locks in its clavor and turns out a luscious butter fillet that flakes perfectly every time. You can use skin-on or skinless salmon---I personally love the additional healthy omega-3 fatty acids and flavor in the skin. I roast some baby potatoes right alongside, and then serve everything with Goddess sauce, an herby avocado-yogurt sauce that you'll want to scoop up into every bite."
 

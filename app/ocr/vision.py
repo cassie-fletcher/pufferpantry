@@ -838,6 +838,50 @@ def parse_lines(vision: VisionOutput, photo_filename: str) -> PhotoExtractResult
 # line; otherwise arbitrary.
 PAGE_STACK_GAP = 40.0
 
+# A vertical gap this many times the page's median line-to-line spacing marks
+# a BLOCK boundary for sub-recipe resolution (Cassie's blocking model: a
+# sub-recipe is set off from the main content by substantial white space).
+# Measured on the salmon's referenced page: normal spacing ~23-25px, the gap
+# above the goddess-sauce block ~55px -> ratio ~2.2. Robust to page tilt,
+# unlike line-height comparisons, because neighboring gaps inflate together.
+BLOCK_GAP_FACTOR = 2.0
+
+
+# Same-row jitter floor: top-to-top diffs below this many pixels are two
+# columns sharing a row, not consecutive rows — excluded from the spacing
+# median so column-dense pages don't drag the block threshold toward zero.
+_ROW_JITTER_PX = 8.0
+
+
+def _blocked_text(out: VisionOutput) -> str:
+    """The page's text with blank lines at large vertical gaps.
+
+    Encodes the page's visual block structure for the text-based resolver.
+    Boundaries are judged on TOP-TO-TOP line spacing, not bottom-to-top:
+    page tilt inflates Vision's box heights (a wide skewed line's y1 grows by
+    ~width*sin(tilt)), so bottom-to-top gaps collapse under skew — measured
+    on the salmon's referenced page, the 55px gap above the sauce block reads
+    as 4px bottom-to-top. Top edges are stable under the same tilt.
+
+    Within a block, lines keep (y, x) order — two-column blocks interleave,
+    which the resolver's quantity/paragraph split tolerates.
+    """
+    lines = sorted(out.lines, key=lambda l: (l.y0, l.x0))
+    if len(lines) < 3:
+        return "\n".join(l.text for l in lines)
+    spacings = sorted(
+        d
+        for a, b in zip(lines, lines[1:])
+        if (d := b.y0 - a.y0) >= _ROW_JITTER_PX
+    )
+    median_spacing = spacings[len(spacings) // 2] if spacings else 24.0
+    parts: list[str] = [lines[0].text]
+    for prev, line in zip(lines, lines[1:]):
+        if line.y0 - prev.y0 > BLOCK_GAP_FACTOR * median_spacing:
+            parts.append("")  # block boundary
+        parts.append(line.text)
+    return "\n".join(parts)
+
 
 def _stack_pages(outputs: list[VisionOutput]) -> VisionOutput:
     """Combine per-page outputs by stacking pages vertically.
@@ -904,14 +948,15 @@ def read(image_path: Path | Sequence[Path], **opts: Any) -> Reading:
 
     # Multi-page: pages after the first are either CONTINUATIONS (stacked
     # under page 1 as before) or REFERENCED pages — a sub-recipe that appears
-    # as an ingredient in the main recipe, detected by a heading on that
-    # page's TEXT matching a main-list ingredient (app/ocr/resolve.py).
+    # as an ingredient in the main recipe, resolved by Cassie's blocking
+    # model (app/ocr/resolve.py): the page splits into blocks at large
+    # vertical gaps, and a lower block whose opening line names a main-list
+    # ingredient is the sub-recipe. The resolver works on text, so the
+    # geometry is encoded as blank lines here (see _blocked_text).
     # Detection uses a provisional parse of page 1 alone for the ingredient
     # list; referenced pages contribute only their text to the resolver and
     # are excluded from the geometric stack.
-    page_texts = [
-        "\n".join(line.text for line in out.lines) for out in outputs
-    ]
+    page_texts = [_blocked_text(out) for out in outputs]
     provisional = parse_lines(outputs[0], photo_filename=paths[0].name)
     _, continuation_rel = resolve_references(provisional, page_texts[1:])
     continuation_pages = {i + 1 for i in continuation_rel}

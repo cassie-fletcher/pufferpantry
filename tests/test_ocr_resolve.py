@@ -4,10 +4,10 @@ All synthetic: pure functions on text, no OCR engines invoked.
 """
 
 from app.ocr.resolve import (
-    extract_block,
     find_reference,
     parse_block,
     resolve_references,
+    split_blocks,
 )
 from app.schemas.recipe import IngredientCreate, PhotoExtractResult
 
@@ -75,10 +75,10 @@ def test_find_reference_detects_goddess_sauce():
     match = find_reference(main_schema().ingredients, REFERENCED_PAGE)
     assert match is not None
     assert match.heading == "GODDESS SAUCE"
-    assert match.group == "Goddess Sauce"
+    assert match.group == "GODDESS SAUCE"
     assert match.ingredient_index == 2
-    lines = REFERENCED_PAGE.splitlines()
-    assert lines[match.heading_line_index] == "GODDESS SAUCE"
+    block = split_blocks(REFERENCED_PAGE)[match.block_index]
+    assert block.splitlines()[0] == "GODDESS SAUCE"
 
 
 def test_find_reference_none_on_continuation_page():
@@ -89,14 +89,16 @@ def test_find_reference_fuzzy_matches_case_and_ocr_noise():
     # Title Case instead of ALL-CAPS still matches (token subset after
     # lowercasing), and a one-letter OCR drop matches via the difflib path.
     ingredients = main_schema().ingredients
-    assert find_reference(ingredients, "Goddess Sauce\n1/2 cup mayo") is not None
-    assert find_reference(ingredients, "GODDES SAUCE\n1/2 cup mayo") is not None
+    # A leading block stands in for the page's own content: only blocks
+    # after the first are candidates under the blocking model.
+    assert find_reference(ingredients, "OTHER CONTENT\n\nGoddess Sauce\n1/2 cup mayo") is not None
+    assert find_reference(ingredients, "OTHER CONTENT\n\nGODDES SAUCE\n1/2 cup mayo") is not None
 
 
 def test_serves_line_does_not_match_any_ingredient():
     # "SERVES 4" is heading-shaped but must not be mistaken for a reference.
     ingredients = main_schema().ingredients
-    assert find_reference(ingredients, "SERVES 4") is None
+    assert find_reference(ingredients, "SOME RECIPE\n\nSERVES 4") is None
 
 
 # --------------------------------------------------------------------------
@@ -104,19 +106,20 @@ def test_serves_line_does_not_match_any_ingredient():
 # --------------------------------------------------------------------------
 
 
-def test_extract_block_runs_to_end_of_page():
-    lines = REFERENCED_PAGE.splitlines()
-    heading_index = lines.index("GODDESS SAUCE")
-    block = extract_block(REFERENCED_PAGE, heading_index)
-    assert block.splitlines()[0] == "GODDESS SAUCE"
-    assert block.splitlines()[-1] == "Season with salt."
-    assert "cauliflower" not in block.lower()
+def test_split_blocks_isolates_the_sauce_block():
+    blocks = split_blocks(REFERENCED_PAGE)
+    assert len(blocks) == 4  # title/serves, ingredients, steps, sauce
+    sauce = blocks[-1]
+    assert sauce.splitlines()[0] == "GODDESS SAUCE"
+    assert sauce.splitlines()[-1] == "Season with salt."
+    assert "cauliflower" not in sauce.lower()
 
 
-def test_extract_block_stops_at_foreign_heading():
+def test_split_blocks_requires_blank_line_boundaries():
+    # No blank line, no boundary: the blocking model relies on white space
+    # (readers encode geometric gaps as blank lines).
     page = "GODDESS SAUCE\n1/2 cup mayonnaise\nANOTHER RECIPE\n2 cups flour"
-    block = extract_block(page, 0)
-    assert block == "GODDESS SAUCE\n1/2 cup mayonnaise"
+    assert len(split_blocks(page)) == 1
 
 
 def test_parse_block_quantity_unit_name_split():
@@ -128,7 +131,7 @@ def test_parse_block_quantity_unit_name_split():
         "2 lemons\n"
         "Blend until smooth."
     )
-    ingredients, instructions = parse_block(block, group="Goddess Sauce")
+    ingredients, instructions = parse_block(block, group="GODDESS SAUCE")
     by_name = {i.name: i for i in ingredients}
 
     assert by_name["lemon juice"].amount == "2"
@@ -142,7 +145,7 @@ def test_parse_block_quantity_unit_name_split():
     assert by_name["lemons"].amount == "2"
     assert by_name["lemons"].unit is None
 
-    assert all(i.group == "Goddess Sauce" for i in ingredients)
+    assert all(i.group == "GODDESS SAUCE" for i in ingredients)
     assert [i.order for i in ingredients] == list(range(len(ingredients)))
     assert instructions == "Blend until smooth."
 
@@ -157,7 +160,7 @@ def test_resolve_merges_referenced_page():
     resolved, continuations = resolve_references(schema, [REFERENCED_PAGE])
     assert continuations == []
 
-    sauce = [i for i in resolved.ingredients if i.group == "Goddess Sauce"]
+    sauce = [i for i in resolved.ingredients if i.group == "GODDESS SAUCE"]
     assert [i.name for i in sauce] == [
         "mayonnaise",
         "lemon juice",
@@ -175,7 +178,7 @@ def test_resolve_merges_referenced_page():
     # Instructions gain the section with the --- header, after the main steps.
     assert resolved.instructions.startswith(schema.instructions)
     assert (
-        "\n\n--- Goddess Sauce ---\n"
+        "\n\n--- GODDESS SAUCE ---\n"
         "Blend everything until smooth and green. Season with salt."
     ) in resolved.instructions
 
@@ -196,7 +199,7 @@ def test_resolve_returns_continuation_indices_and_leaves_schema_unchanged():
         schema, [CONTINUATION_PAGE, REFERENCED_PAGE]
     )
     assert continuations == [0]
-    assert any(i.group == "Goddess Sauce" for i in resolved.ingredients)
+    assert any(i.group == "GODDESS SAUCE" for i in resolved.ingredients)
 
 
 def test_resolve_does_not_mutate_input_schema():

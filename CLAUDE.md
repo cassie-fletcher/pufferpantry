@@ -90,6 +90,8 @@ script") underpins all of the above.
   - Decided 2026-07-31: the buy-vs-make choice is a nested toggle on the recipe-selection checkbox at add-to-list time — shown only for recipes with sub-recipe groups, default checked (= make it). No persistent per-recipe preference yet; promote the default later only if the same sauce gets unchecked every week. Touches the recipe-selection GUI and the add-to-list request payload (recipe router/service must carry the per-group flag through to `generate_shopping_list`).
   - Decided 2026-07-31, list semantics: BUY -> the group's ingredients are excluded and one line replaces them: "<group name> (store-bought)", quantity = the sub-recipe's printed yield (captured at parse time; needs a per-group yield field in the extraction schema — parse_block currently drops MAKES lines as metadata), category = noun-based via the existing convention ("sauce" -> Pantry; review UI recategorizes refrigerated ones). MAKE -> group ingredients consolidate normally and the Main-list reference entry is skipped (no phantom "goddess sauce" item). Salmon GT records the sauce yield under `sub_recipes:`.
 
+- [ ] **Live-test URL extraction end-to-end.** The local JSON-LD reader is fully mocked-tested; run it against real HBH/skinnytaste URLs and eyeball the parsed recipes (Cassie suspects it's quite good — verify). No API involved; just real fetches.
+
 ### Code cleanup
 - [ ] "Step" is overloaded in photo_service.py — means both extraction pipeline stages and recipe cooking steps. Rename to disambiguate.
 - [ ] Validate Claude's JSON response against a Pydantic schema after `_parse_claude_json` (line ~351). Currently no check that required fields exist or have correct types.

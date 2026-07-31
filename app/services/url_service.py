@@ -212,8 +212,210 @@ def _download_image(image_url: str) -> str | None:
     return filename
 
 
+
+# --------------------------------------------------------------------------
+# Local JSON-LD extraction (primary path — no API calls)
+# --------------------------------------------------------------------------
+# Recipe sites embed schema.org/Recipe structured data in
+# <script type="application/ld+json"> blocks (verified on the owner's source
+# sites). Reading it is deterministic parsing, not AI: no model, no cost,
+# same result every run.
+
+_JSON_LD_RE = re.compile(
+    r"<script[^>]*type=[\"']application/ld\+json[\"'][^>]*>(.*?)</script>",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# The ingredient strings in JSON-LD are clean text ("2 tablespoons extra
+# virgin olive oil"), so they reuse the engine-free splitting machinery from
+# the OCR-side block parser — one implementation of quantity/unit/name.
+from app.ocr.normalize import normalize_ingredients
+from app.ocr.resolve import (  # noqa: PLC2701 - engine-free helpers, see comment
+    UNIT_WORDS,
+    _EDGE_PUNCT,
+    _QUANTITY_RE,
+    _normalize_fractions,
+)
+from app.schemas.recipe import IngredientCreate
+
+
+def _json_ld_recipes(page_html: str) -> list[dict]:
+    """Every schema.org object with @type Recipe found in the page."""
+    found: list[dict] = []
+
+    def walk(obj) -> None:
+        if isinstance(obj, list):
+            for item in obj:
+                walk(item)
+            return
+        if not isinstance(obj, dict):
+            return
+        types = obj.get("@type", "")
+        if isinstance(types, str):
+            types = [types]
+        if any(t.lower() == "recipe" for t in types if isinstance(t, str)):
+            found.append(obj)
+        walk(obj.get("@graph", []))
+
+    for match in _JSON_LD_RE.finditer(page_html):
+        try:
+            walk(json.loads(match.group(1)))
+        except (json.JSONDecodeError, TypeError):
+            continue  # malformed blocks are common; skip, don't fail the page
+    return found
+
+
+def _split_ingredient(text: str, order: int) -> IngredientCreate:
+    """One JSON-LD ingredient string -> amount / unit / name."""
+    stripped = _normalize_fractions(text.strip())
+    match = _QUANTITY_RE.match(stripped)
+    if not match:
+        return IngredientCreate(name=stripped.strip(" ,;"), order=order)
+    amount = " ".join(match.group(1).split())
+    words = match.group(2).strip().split()
+    unit = None
+    if words and words[0].strip(_EDGE_PUNCT).lower() in UNIT_WORDS:
+        unit = words[0].strip(_EDGE_PUNCT)
+        words = words[1:]
+    return IngredientCreate(
+        name=" ".join(words).strip(" ,;"), amount=amount, unit=unit, order=order
+    )
+
+
+def _instruction_lines(items, lines: list[str]) -> None:
+    """Flatten recipeInstructions: strings, HowToStep, nested HowToSection."""
+    if isinstance(items, str):
+        lines.append(items)
+        return
+    if isinstance(items, dict):
+        if items.get("@type") == "HowToSection":
+            name = items.get("name")
+            if name:
+                lines.append(f"--- {name} ---")
+            _instruction_lines(items.get("itemListElement", []), lines)
+        else:
+            text = items.get("text") or items.get("name") or ""
+            if text:
+                lines.append(text)
+        return
+    if isinstance(items, list):
+        for item in items:
+            _instruction_lines(item, lines)
+
+
+def _first_int(value) -> int | None:
+    if isinstance(value, int):
+        return value
+    for candidate in value if isinstance(value, list) else [value]:
+        found = re.search(r"\d+", str(candidate))
+        if found:
+            return int(found.group())
+    return None
+
+
+def _map_json_ld(recipe: dict) -> dict:
+    """schema.org Recipe -> the UrlExtractResult field shape."""
+    lines: list[str] = []
+    _instruction_lines(recipe.get("recipeInstructions", []), lines)
+    numbered, n = [], 0
+    for line in lines:
+        if line.startswith("--- "):
+            numbered.append(line)
+            n = 0  # sub-recipe sections restart their numbering
+        else:
+            n += 1
+            numbered.append(f"{n}. {line}")
+
+    ingredients = normalize_ingredients(
+        [
+            _split_ingredient(text, order)
+            for order, text in enumerate(recipe.get("recipeIngredient", []))
+            if str(text).strip()
+        ]
+    )
+
+    nutrition = recipe.get("nutrition") or {}
+    cuisine = recipe.get("recipeCuisine")
+    if isinstance(cuisine, list):
+        cuisine = cuisine[0] if cuisine else None
+
+    return {
+        "title": str(recipe.get("name", "")).strip() or "Untitled recipe",
+        "servings": _first_int(recipe.get("recipeYield", "")) or 2,
+        "instructions": "\n\n".join(numbered) if numbered else None,
+        "notes": str(recipe.get("description", "")).strip() or None,
+        "cuisine": cuisine,
+        "calories_per_serving": _first_int(nutrition.get("calories", "")),
+        "ingredients": [i.model_dump() for i in ingredients],
+    }
+
+
 def extract_recipe_from_url(url: str) -> dict:
-    """Fetch a recipe URL and extract structured recipe data via Claude."""
+    """Fetch a recipe URL and extract its schema.org Recipe data locally.
+
+    The PRIMARY url-import path: no API call, no model, deterministic. A page
+    without Recipe JSON-LD is a clear 422 — per the owner's decision
+    (2026-07-31) there is NO fallback to the Claude backup below.
+    """
+    try:
+        response = httpx.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (PufferPantry recipe importer)"},
+            follow_redirects=True,
+            timeout=15,
+        )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=422, detail=f"Could not fetch URL: HTTP {e.response.status_code}")
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=422, detail=f"Could not fetch URL: {e}")
+
+    page_html = response.text
+    recipes = _json_ld_recipes(page_html)
+    if not recipes:
+        raise HTTPException(
+            status_code=422,
+            detail="This site does not publish readable recipe data "
+            "(no schema.org Recipe found on the page).",
+        )
+
+    mapped = _map_json_ld(recipes[0])
+    logger.info(
+        "url extraction (local json-ld): url=%s title=%r ingredients=%d",
+        url,
+        mapped["title"],
+        len(mapped["ingredients"]),
+    )
+
+    try:
+        result = UrlExtractResult.model_validate(mapped)
+    except ValidationError as exc:
+        logger.error(
+            "json-ld extraction for %s failed UrlExtractResult validation: %s",
+            url, exc,
+        )
+        raise HTTPException(
+            status_code=422,
+            detail="The page's recipe data did not match the expected format.",
+        )
+
+    data = result.model_dump()
+    image_url = _find_recipe_image(page_html)
+    if image_url:
+        filename = _download_image(image_url)
+        if filename:
+            data["dish_photo_filename"] = filename
+    return data
+
+
+def extract_recipe_from_url_claude(url: str) -> dict:
+    """BACKUP PATH — deliberately unused. Fetch a URL and extract via Claude.
+
+    Kept per the owner's decision (2026-07-31): URL import must not make API
+    calls; the primary path is the local JSON-LD reader above. This function
+    is retained as a backup only and is wired to NOTHING. Do not call it or
+    route to it without her explicit ok.
+    """
     if not settings.anthropic_api_key:
         raise HTTPException(
             status_code=500,

@@ -3,7 +3,18 @@
 Follows the same convention as test_photo_extraction.py: the Claude API is
 mocked (no real API key, no network), and here the page fetch (httpx.get)
 is mocked too — no real URLs are ever hit.
+
+The request-model tests hit the endpoint. The Claude-behavior tests target
+extract_recipe_from_url_claude DIRECTLY: it is the deliberately-dormant
+backup (the endpoint runs the local JSON-LD path, tested in
+test_url_local_extraction.py), and these tests keep the backup honest
+without wiring it to anything.
 """
+
+import pytest
+from fastapi import HTTPException
+
+from app.services.url_service import extract_recipe_from_url_claude
 
 import json
 from unittest.mock import MagicMock, patch
@@ -99,15 +110,34 @@ def test_wrong_type_url_rejected(client):
     assert response.status_code == 422
 
 
+
+
+class _Resp:
+    """Adapt the backup function's outcome to the response-ish shape the
+    assertions below were written against."""
+
+    def __init__(self, status_code: int, body):
+        self.status_code = status_code
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
+def _call_backup() -> _Resp:
+    try:
+        return _Resp(200, extract_recipe_from_url_claude(TEST_URL))
+    except HTTPException as exc:
+        return _Resp(exc.status_code, {"detail": exc.detail})
+
+
 # --- Response handling (mocked Claude + mocked page fetch) ---
 
 
 @patch("app.services.url_service.httpx.get")
 @patch("app.services.url_service.settings")
 @patch("app.services.url_service.Anthropic")
-def test_extract_from_url_multi_block_response(
-    mock_anthropic_cls, mock_settings, mock_httpx_get, client
-):
+def test_extract_from_url_multi_block_response(mock_anthropic_cls, mock_settings, mock_httpx_get):
     """A response with a thinking block first still extracts the text block,
     and the model id comes from settings.claude_model_fast."""
     mock_settings.anthropic_api_key = "sk-ant-test-key"
@@ -120,7 +150,7 @@ def test_extract_from_url_multi_block_response(
         json.dumps(SAMPLE_URL_RESPONSE)
     )
 
-    response = client.post("/api/recipes/extract-from-url", json={"url": TEST_URL})
+    response = _call_backup()
 
     assert response.status_code == 200
     data = response.json()
@@ -128,9 +158,10 @@ def test_extract_from_url_multi_block_response(
     assert data["servings"] == 4
     assert data["protein_type"] == "salmon"
     assert data["cuisine"] == "American"
-    assert data["meal_type"] == "dinner"
-    assert data["source_type"] == "website"
-    assert data["source_details"] == TEST_URL
+    # meal_type is stamped by the ROUTER, not the service — endpoint-level
+    # behavior, now exercised by the local-path tests instead
+    # source_type is also router-stamped — same reasoning as meal_type
+    # source_details is router-stamped too
     assert len(data["ingredients"]) == 2
     # Numeric amount coerced to string by the schema
     assert data["ingredients"][1]["amount"] == "1"
@@ -145,9 +176,7 @@ def test_extract_from_url_multi_block_response(
 @patch("app.services.url_service.httpx.get")
 @patch("app.services.url_service.settings")
 @patch("app.services.url_service.Anthropic")
-def test_extract_handles_markdown_fences(
-    mock_anthropic_cls, mock_settings, mock_httpx_get, client
-):
+def test_extract_handles_markdown_fences(mock_anthropic_cls, mock_settings, mock_httpx_get):
     mock_settings.anthropic_api_key = "sk-ant-test-key"
     mock_settings.claude_model_fast = "claude-test-model-from-settings"
     mock_httpx_get.return_value = _mock_page_response()
@@ -157,7 +186,7 @@ def test_extract_handles_markdown_fences(
     fenced = "```json\n" + json.dumps(SAMPLE_URL_RESPONSE) + "\n```"
     mock_client.messages.create.return_value = _mock_message(fenced)
 
-    response = client.post("/api/recipes/extract-from-url", json={"url": TEST_URL})
+    response = _call_backup()
 
     assert response.status_code == 200
     assert response.json()["title"] == "Green Goddess Salmon"
@@ -166,9 +195,7 @@ def test_extract_handles_markdown_fences(
 @patch("app.services.url_service.httpx.get")
 @patch("app.services.url_service.settings")
 @patch("app.services.url_service.Anthropic")
-def test_extract_handles_preamble_text(
-    mock_anthropic_cls, mock_settings, mock_httpx_get, client
-):
+def test_extract_handles_preamble_text(mock_anthropic_cls, mock_settings, mock_httpx_get):
     """Without a prefill, the model may emit prose before the JSON."""
     mock_settings.anthropic_api_key = "sk-ant-test-key"
     mock_settings.claude_model_fast = "claude-test-model-from-settings"
@@ -180,7 +207,7 @@ def test_extract_handles_preamble_text(
         "Here is the extracted recipe:\n" + json.dumps(SAMPLE_URL_RESPONSE)
     )
 
-    response = client.post("/api/recipes/extract-from-url", json={"url": TEST_URL})
+    response = _call_backup()
 
     assert response.status_code == 200
     assert response.json()["title"] == "Green Goddess Salmon"
@@ -189,9 +216,7 @@ def test_extract_handles_preamble_text(
 @patch("app.services.url_service.httpx.get")
 @patch("app.services.url_service.settings")
 @patch("app.services.url_service.Anthropic")
-def test_refusal_stop_reason_raises_cleanly(
-    mock_anthropic_cls, mock_settings, mock_httpx_get, client
-):
+def test_refusal_stop_reason_raises_cleanly(mock_anthropic_cls, mock_settings, mock_httpx_get):
     mock_settings.anthropic_api_key = "sk-ant-test-key"
     mock_settings.claude_model_fast = "claude-test-model-from-settings"
     mock_httpx_get.return_value = _mock_page_response()
@@ -203,7 +228,7 @@ def test_refusal_stop_reason_raises_cleanly(
         "", stop_reason="refusal", content=[]
     )
 
-    response = client.post("/api/recipes/extract-from-url", json={"url": TEST_URL})
+    response = _call_backup()
 
     assert response.status_code == 422
     assert "declined" in response.json()["detail"].lower()
@@ -212,9 +237,7 @@ def test_refusal_stop_reason_raises_cleanly(
 @patch("app.services.url_service.httpx.get")
 @patch("app.services.url_service.settings")
 @patch("app.services.url_service.Anthropic")
-def test_max_tokens_stop_reason_raises_cleanly(
-    mock_anthropic_cls, mock_settings, mock_httpx_get, client
-):
+def test_max_tokens_stop_reason_raises_cleanly(mock_anthropic_cls, mock_settings, mock_httpx_get):
     mock_settings.anthropic_api_key = "sk-ant-test-key"
     mock_settings.claude_model_fast = "claude-test-model-from-settings"
     mock_httpx_get.return_value = _mock_page_response()
@@ -225,7 +248,7 @@ def test_max_tokens_stop_reason_raises_cleanly(
         '{"title": "Truncat', stop_reason="max_tokens"
     )
 
-    response = client.post("/api/recipes/extract-from-url", json={"url": TEST_URL})
+    response = _call_backup()
 
     assert response.status_code == 502
     assert "truncated" in response.json()["detail"].lower()
@@ -234,7 +257,7 @@ def test_max_tokens_stop_reason_raises_cleanly(
 @patch("app.services.url_service.httpx.get")
 @patch("app.services.url_service.settings")
 @patch("app.services.url_service.Anthropic")
-def test_bad_json_returns_422(mock_anthropic_cls, mock_settings, mock_httpx_get, client):
+def test_bad_json_returns_422(mock_anthropic_cls, mock_settings, mock_httpx_get):
     mock_settings.anthropic_api_key = "sk-ant-test-key"
     mock_settings.claude_model_fast = "claude-test-model-from-settings"
     mock_httpx_get.return_value = _mock_page_response()
@@ -245,7 +268,7 @@ def test_bad_json_returns_422(mock_anthropic_cls, mock_settings, mock_httpx_get,
         "I found a recipe but couldn't read the ingredients clearly."
     )
 
-    response = client.post("/api/recipes/extract-from-url", json={"url": TEST_URL})
+    response = _call_backup()
 
     assert response.status_code == 422
     assert "parse" in response.json()["detail"].lower()
@@ -254,9 +277,7 @@ def test_bad_json_returns_422(mock_anthropic_cls, mock_settings, mock_httpx_get,
 @patch("app.services.url_service.httpx.get")
 @patch("app.services.url_service.settings")
 @patch("app.services.url_service.Anthropic")
-def test_schema_mismatch_returns_422(
-    mock_anthropic_cls, mock_settings, mock_httpx_get, client
-):
+def test_schema_mismatch_returns_422(mock_anthropic_cls, mock_settings, mock_httpx_get):
     """Valid JSON that doesn't fit the recipe schema is a clear 422, not a
     silently-forwarded arbitrary dict."""
     mock_settings.anthropic_api_key = "sk-ant-test-key"
@@ -270,17 +291,17 @@ def test_schema_mismatch_returns_422(
         json.dumps({"servings": 4, "ingredients": []})
     )
 
-    response = client.post("/api/recipes/extract-from-url", json={"url": TEST_URL})
+    response = _call_backup()
 
     assert response.status_code == 422
     assert "format" in response.json()["detail"].lower()
 
 
 @patch("app.services.url_service.settings")
-def test_no_api_key_returns_500(mock_settings, client):
+def test_no_api_key_returns_500(mock_settings):
     mock_settings.anthropic_api_key = ""
 
-    response = client.post("/api/recipes/extract-from-url", json={"url": TEST_URL})
+    response = _call_backup()
 
     assert response.status_code == 500
     assert "API key" in response.json()["detail"]

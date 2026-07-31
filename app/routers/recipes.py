@@ -7,6 +7,7 @@ from app.schemas.recipe import (
     RecipeList,
     RecipeRead,
     RecipeUpdate,
+    UrlExtractRequest,
 )
 from app.services import recipe_service
 from app.services.nutrition_service import calculate_recipe_nutrition
@@ -53,15 +54,16 @@ def extract_from_photo(photos: list[UploadFile] = File(...)):
 
 
 @router.post("/extract-from-url")
-def extract_from_url(body: dict):
-    """Fetch a recipe URL → Claude extracts the recipe → returns data for review."""
-    url = body.get("url", "").strip()
-    if not url:
-        raise HTTPException(status_code=400, detail="URL is required")
-    extracted = extract_recipe_from_url(url)
+def extract_from_url(body: UrlExtractRequest):
+    """Fetch a recipe URL → Claude extracts the recipe → returns data for review.
+
+    A missing or blank `url` is rejected by the request model with a 422
+    (previously a hand-rolled 400 on a raw dict body).
+    """
+    extracted = extract_recipe_from_url(body.url)
     extracted.setdefault("meal_type", "dinner")
     extracted["source_type"] = "website"
-    extracted["source_details"] = url
+    extracted["source_details"] = body.url
     return extracted
 
 

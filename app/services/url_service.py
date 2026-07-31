@@ -6,6 +6,7 @@ regardless of their HTML structure.
 """
 
 import json
+import logging
 import re
 import secrets
 from datetime import datetime
@@ -13,11 +14,23 @@ from pathlib import Path
 
 import httpx
 from anthropic import Anthropic
+from anthropic.types import Message
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from app.config import settings
+from app.schemas.recipe import UrlExtractResult
+
+logger = logging.getLogger(__name__)
 
 PHOTOS_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "photos"
+
+# Hard ceiling on thinking + response tokens combined. On current Claude
+# models thinking can be on by default and shares this budget with the
+# visible JSON, so the old 2048 risked truncating mid-response. 16000 is the
+# largest value that is comfortably safe without streaming (same reasoning as
+# app/ocr/claude.py DEFAULT_MAX_TOKENS).
+MAX_TOKENS = 16000
 
 EXTRACTION_PROMPT = """\
 You are extracting a recipe from text scraped from a recipe website.
@@ -149,10 +162,9 @@ def _extract_text_from_html(html: str) -> str:
 def _find_recipe_image(html: str) -> str | None:
     """Find the main recipe image URL from the page HTML.
 
-    Tries (in order):
-    1. og:image meta tag (Open Graph — most recipe sites set this to the hero photo)
-    2. First large image inside a WPRM recipe container
-    3. First image in the article
+    Looks for the og:image meta tag (Open Graph — most recipe sites set this
+    to the hero photo), trying both attribute orders. Nothing else is
+    attempted; a page without og:image simply gets no photo.
     """
     # og:image is the most reliable — it's the social sharing image
     og_match = re.search(
@@ -232,48 +244,137 @@ def extract_recipe_from_url(url: str) -> dict:
     if len(page_text) < 100:
         raise HTTPException(status_code=422, detail="Page appears to have no recipe content.")
 
-    # Send to Claude for extraction
+    # Send to Claude for extraction.
+    #
+    # Resolved here (not at import time) so a .env / settings change takes
+    # effect without a restart of module state; never hardcode a model id at
+    # the call site (see app/config.py).
+    #
+    # No assistant prefill: prefilling the last assistant turn returns a 400
+    # on current Claude models (Sonnet 4.6+ / Opus 4.6+). The prompt already
+    # demands bare JSON, and _parse_recipe_json skips any preamble/fences.
+    model = settings.claude_model_fast
     client = Anthropic(api_key=settings.anthropic_api_key)
     message = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=2048,
+        model=model,
+        max_tokens=MAX_TOKENS,
+        system=EXTRACTION_PROMPT,
         messages=[
             {
                 "role": "user",
                 "content": f"Extract the main recipe from this page ({url}):\n\n{page_text}",
             },
-            {
-                "role": "assistant",
-                "content": "I'll extract the recipe and return it as JSON.\n\n{",
-            },
         ],
-        system=EXTRACTION_PROMPT,
     )
 
-    # Parse response — Claude's response starts after our prefilled "{"
-    response_text = "{" + message.content[0].text
+    logger.info(
+        "url extraction: model=%s stop_reason=%s in=%s out=%s url=%s",
+        message.model,
+        message.stop_reason,
+        message.usage.input_tokens,
+        message.usage.output_tokens,
+        url,
+    )
 
-    # Strip markdown fences if present
-    cleaned = response_text.strip()
-    if cleaned.startswith("```"):
-        lines = cleaned.split("\n")
-        lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        cleaned = "\n".join(lines)
+    response_text = _extract_response_text(message)
+    logger.debug("url extraction raw response for %s:\n%s", url, response_text)
 
-    try:
-        result = json.loads(cleaned)
-    except json.JSONDecodeError:
+    parsed = _parse_recipe_json(response_text)
+    if not isinstance(parsed, dict):
         raise HTTPException(
             status_code=422,
             detail="Could not parse recipe from this page. Try a different URL.",
         )
 
+    # Validate Claude's JSON into the expected shape. A mismatch is a real
+    # finding about the model's output — log the detail loudly, then surface
+    # a clear client error instead of passing an arbitrary dict downstream.
+    try:
+        result = UrlExtractResult.model_validate(parsed)
+    except ValidationError as exc:
+        logger.error(
+            "url extraction for %s failed UrlExtractResult validation "
+            "(top-level keys: %s): %s",
+            url,
+            sorted(parsed),
+            exc,
+        )
+        raise HTTPException(
+            status_code=422,
+            detail="Claude's extraction did not match the expected recipe format. "
+            "Try a different URL.",
+        )
+
+    data = result.model_dump()
+
     # Download the recipe image if we found one
     if image_url:
         filename = _download_image(image_url)
         if filename:
-            result["dish_photo_filename"] = filename
+            data["dish_photo_filename"] = filename
 
-    return result
+    return data
+
+
+def _extract_response_text(message: Message) -> str:
+    """Pull the assistant's visible text out of a Messages API response.
+
+    Mirrors app/ocr/claude.py `_extract_response_text`, raising HTTPException
+    instead of ValueError because this module runs inside a request handler.
+
+    Deliberately not `message.content[0].text`: on current Claude models
+    thinking can be on by default, so `content[0]` may be a thinking block —
+    indexing position 0 would crash or hand back an empty string. Scan for
+    the first block that is actually text, and surface refusal/truncation as
+    clear errors rather than confusing JSON parse failures.
+    """
+    if message.stop_reason == "refusal":
+        logger.warning(
+            "url extraction refused by Claude: stop_details=%s",
+            getattr(message, "stop_details", None),
+        )
+        raise HTTPException(
+            status_code=422,
+            detail="Claude declined to extract a recipe from this page.",
+        )
+    if message.stop_reason == "max_tokens":
+        raise HTTPException(
+            status_code=502,
+            detail="Claude's response was truncated before the recipe was complete. "
+            "Try again.",
+        )
+
+    for block in message.content:
+        if block.type == "text":
+            return block.text
+
+    raise HTTPException(
+        status_code=502,
+        detail="Claude returned no text content for this page.",
+    )
+
+
+def _parse_recipe_json(response_text: str) -> dict | list:
+    """Parse JSON out of Claude's response text.
+
+    Same strategy as photo_service._parse_claude_json (kept local so the two
+    paths can keep their own error messages): prefer a fenced ```json block,
+    otherwise skip any preamble up to the first '{' or '['.
+    """
+    cleaned = response_text.strip()
+
+    fence_match = re.search(r"```(?:json)?\s*\n([\s\S]*?)```", cleaned)
+    if fence_match:
+        cleaned = fence_match.group(1).strip()
+    else:
+        positions = [p for p in (cleaned.find("["), cleaned.find("{")) if p >= 0]
+        if positions:
+            cleaned = cleaned[min(positions):]
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=422,
+            detail="Could not parse recipe from this page. Try a different URL.",
+        )

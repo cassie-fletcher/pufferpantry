@@ -46,7 +46,8 @@ def extract_from_photo(photos: list[UploadFile] = File(...)):
     recipes = result if isinstance(result, list) else [result]
 
     for recipe in recipes:
-        recipe["photo_filename"] = filenames[0]
+        recipe["photo_filename"] = filenames[0]     # title page (starred first)
+        recipe["photo_filenames"] = filenames       # ALL pages, in order — no orphans
         recipe.setdefault("meal_type", "dinner")
 
     # Return array — frontend handles single or multiple

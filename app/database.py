@@ -29,5 +29,35 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def create_tables() -> None:
-    """Create all tables that don't exist yet. Safe to call repeatedly."""
+    """Create tables that don't exist and add any missing columns.
+
+    Safe to call repeatedly. create_all only creates missing TABLES — it
+    never alters existing ones — so additive columns are applied here with
+    explicit ALTERs (checked against pragma first: idempotent). Never drops
+    or rewrites anything; see the data-safety rules.
+    """
     Base.metadata.create_all(bind=engine)
+    _ensure_recipe_columns()
+
+
+def _ensure_recipe_columns() -> None:
+    import json as _json
+
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        existing = {
+            row[1] for row in conn.execute(text("PRAGMA table_info(recipes)"))
+        }
+        if "photo_filenames" not in existing:
+            conn.execute(text("ALTER TABLE recipes ADD COLUMN photo_filenames JSON"))
+            # Backfill: every existing single photo becomes a one-page list.
+            for rid, fname in conn.execute(
+                text("SELECT id, photo_filename FROM recipes WHERE photo_filename IS NOT NULL")
+            ).fetchall():
+                conn.execute(
+                    text("UPDATE recipes SET photo_filenames = :v WHERE id = :id"),
+                    {"v": _json.dumps([fname]), "id": rid},
+                )
+        if "sub_recipe_yields" not in existing:
+            conn.execute(text("ALTER TABLE recipes ADD COLUMN sub_recipe_yields JSON"))

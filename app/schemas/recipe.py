@@ -36,6 +36,8 @@ class RecipeCreate(BaseModel):
     notes: str | None = None
     calories_per_serving: int | None = None
     photo_filename: str | None = None
+    photo_filenames: list[str] = []
+    sub_recipe_yields: dict[str, str] = {}
     dish_photo_filename: str | None = None
     dish_photo_position: str | None = None
     rating_cassie: int | None = None
@@ -55,6 +57,8 @@ class RecipeUpdate(BaseModel):
     notes: str | None = None
     calories_per_serving: int | None = None
     photo_filename: str | None = None
+    photo_filenames: list[str] = []
+    sub_recipe_yields: dict[str, str] = {}
     dish_photo_filename: str | None = None
     dish_photo_position: str | None = None
     rating_cassie: int | None = None
@@ -75,6 +79,8 @@ class RecipeRead(BaseModel):
     notes: str | None
     calories_per_serving: int | None
     photo_filename: str | None
+    photo_filenames: list[str] | None
+    sub_recipe_yields: dict[str, str] | None
     dish_photo_filename: str | None
     dish_photo_position: str | None
     rating_cassie: int | None
@@ -115,6 +121,10 @@ class PhotoExtractResult(BaseModel):
     notes: str | None = None
     ingredients: list[IngredientCreate] = []
     photo_filename: str
+    photo_filenames: list[str] = []
+    # {"<group name as printed>": "<printed yield>"} — filled by sub-recipe
+    # resolution when the referenced block carries a MAKES/YIELD line.
+    sub_recipe_yields: dict[str, str] = {}
 
 
 class UrlExtractRequest(BaseModel):

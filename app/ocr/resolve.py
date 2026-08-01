@@ -321,9 +321,14 @@ def _find_ingredient_run(
     return start, end
 
 
+# A sub-recipe block's yield line ("MAKES ABOUT 1 3/4 CUPS"). Captured, not
+# discarded: the shopping list's store-bought line uses it as the quantity.
+_YIELD_RE = re.compile(r"^\s*(?:MAKES|YIELDS?)\b[:\s]*(?:ABOUT\s+)?(.+?)\s*$", re.IGNORECASE)
+
+
 def parse_block(
     block_text: str, group: str
-) -> tuple[list[IngredientCreate], str]:
+) -> tuple[list[IngredientCreate], str, str | None]:
     """Parse an extracted block as a mini-recipe.
 
     After the heading/metadata drops, the block's ingredient RUN is located
@@ -339,9 +344,22 @@ def parse_block(
     entry.
     """
     kept: list[str] = []
+    block_yield: str | None = None
     for line in block_text.splitlines():
         stripped = line.strip()
         if not stripped:
+            continue
+        # The yield line is captured, not discarded: the shopping list's
+        # store-bought line uses it as the quantity. First one wins; a
+        # quantity-led line can't be a yield ("1 3/4 cups broth" is an
+        # ingredient even if OCR mangles a MAKES prefix onto it).
+        yield_match = _YIELD_RE.match(stripped)
+        if (
+            yield_match
+            and block_yield is None
+            and not _QUANTITY_RE.match(_normalize_fractions(stripped))
+        ):
+            block_yield = yield_match.group(1).strip(" .")
             continue
         if is_heading(stripped):
             continue
@@ -398,7 +416,7 @@ def parse_block(
             instruction_lines.append(stripped)
 
     instructions = re.sub(r"\s+", " ", " ".join(instruction_lines)).strip()
-    return normalize_ingredients(ingredients), instructions
+    return normalize_ingredients(ingredients), instructions, block_yield
 
 
 def resolve_references(
@@ -415,6 +433,7 @@ def resolve_references(
     main_ingredients = list(schema.ingredients)
     merged_ingredients = list(schema.ingredients)
     instructions = schema.instructions
+    sub_recipe_yields = dict(getattr(schema, "sub_recipe_yields", {}) or {})
     continuations: list[int] = []
 
     for page_index, page_text in enumerate(extra_page_texts):
@@ -423,9 +442,11 @@ def resolve_references(
             continuations.append(page_index)
             continue
         block = split_blocks(page_text)[match.block_index]
-        block_ingredients, block_instructions = parse_block(
+        block_ingredients, block_instructions, block_yield = parse_block(
             block, group=match.group
         )
+        if block_yield:
+            sub_recipe_yields[match.group] = block_yield
         merged_ingredients.extend(block_ingredients)
         if block_instructions:
             section = f"--- {match.group} ---\n{block_instructions}"
@@ -434,6 +455,10 @@ def resolve_references(
             )
 
     updated = schema.model_copy(
-        update={"ingredients": merged_ingredients, "instructions": instructions}
+        update={
+            "ingredients": merged_ingredients,
+            "instructions": instructions,
+            "sub_recipe_yields": sub_recipe_yields,
+        }
     )
     return updated, continuations

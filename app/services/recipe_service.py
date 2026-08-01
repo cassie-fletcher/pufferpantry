@@ -30,6 +30,8 @@ def create_recipe(db: Session, data: RecipeCreate) -> Recipe:
         notes=data.notes,
         calories_per_serving=data.calories_per_serving,
         photo_filename=data.photo_filename,
+        photo_filenames=data.photo_filenames or None,
+        sub_recipe_yields=data.sub_recipe_yields or None,
         dish_photo_filename=data.dish_photo_filename,
     )
     for ing in data.ingredients:

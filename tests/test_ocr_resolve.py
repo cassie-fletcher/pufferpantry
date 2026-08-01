@@ -131,7 +131,7 @@ def test_parse_block_quantity_unit_name_split():
         "2 lemons\n"
         "Blend until smooth."
     )
-    ingredients, instructions = parse_block(block, group="GODDESS SAUCE")
+    ingredients, instructions, _ = parse_block(block, group="GODDESS SAUCE")
     by_name = {i.name: i for i in ingredients}
 
     assert by_name["lemon juice"].amount == "2"
@@ -165,7 +165,7 @@ def test_parse_block_quantityless_line_inside_run_is_ingredient():
         "1 teaspoon ground cumin\n"
         "Fine pink Himalayan salt\n"
     )
-    ingredients, instructions = parse_block(block, group="GODDESS SAUCE")
+    ingredients, instructions, _ = parse_block(block, group="GODDESS SAUCE")
     assert [i.name for i in ingredients] == [
         "avocado, halved and pitted",
         "Juice of 1 lemon",
@@ -192,7 +192,7 @@ def test_parse_block_quantity_led_line_after_run_is_not_ingredient():
         "1 tablespoon at a time, as needed, to thin the\n"
         "sauce. Taste and add more salt as needed.\n"
     )
-    ingredients, instructions = parse_block(block, group="GODDESS SAUCE")
+    ingredients, instructions, _ = parse_block(block, group="GODDESS SAUCE")
     assert [i.name for i in ingredients] == [
         "avocado, halved and pitted",
         "plain Greek yogurt",
@@ -224,7 +224,7 @@ def test_parse_block_run_detection_on_mixed_fixture():
         "1 tablespoon at a time, as needed, to thin the\n"
         "sauce. Taste and add more salt as needed.\n"
     )
-    ingredients, instructions = parse_block(block, group="goddess sauce")
+    ingredients, instructions, _ = parse_block(block, group="goddess sauce")
 
     # The run is exactly the eight ingredient lines: quantity-less lines
     # inside it are admitted, nothing from the paragraph leaks in.
@@ -257,7 +257,7 @@ def test_parse_block_trailing_prose_line_is_not_ingredient():
         "Blend everything until smooth.\n"
         "Season with salt.\n"
     )
-    ingredients, instructions = parse_block(block, group="GODDESS SAUCE")
+    ingredients, instructions, _ = parse_block(block, group="GODDESS SAUCE")
     assert [i.name for i in ingredients] == ["mayonnaise", "lemon juice"]
     assert instructions == "Blend everything until smooth. Season with salt."
 
@@ -266,7 +266,7 @@ def test_parse_block_no_quantity_led_lines_means_no_ingredients():
     # Without a single quantity-led line there is no run: everything that
     # survives the heading drops is instructions.
     block = "GODDESS SAUCE\nWhisk the dressing well before serving.\n"
-    ingredients, instructions = parse_block(block, group="GODDESS SAUCE")
+    ingredients, instructions, _ = parse_block(block, group="GODDESS SAUCE")
     assert ingredients == []
     assert instructions == "Whisk the dressing well before serving."
 
@@ -334,3 +334,21 @@ def test_resolve_is_deterministic():
     first = resolve_references(main_schema(), [REFERENCED_PAGE, CONTINUATION_PAGE])
     second = resolve_references(main_schema(), [REFERENCED_PAGE, CONTINUATION_PAGE])
     assert first == second
+
+
+def test_parse_block_captures_yield():
+    block = (
+        "goddess sauce\n"
+        "MAKES ABOUT 1 3/4 CUPS\n"
+        "1 avocado, halved and pitted\n"
+        "Blend everything until smooth."
+    )
+    _, _, block_yield = parse_block(block, group="goddess sauce")
+    assert block_yield == "1 3/4 CUPS"
+
+
+def test_resolve_puts_yield_on_schema():
+    schema = main_schema()
+    page = "OTHER RECIPE CONTENT\n\nGODDESS SAUCE\nMAKES ABOUT 2 CUPS\n1/2 cup mayonnaise\nBlend it."
+    resolved, _ = resolve_references(schema, [page])
+    assert resolved.sub_recipe_yields == {"GODDESS SAUCE": "2 CUPS"}

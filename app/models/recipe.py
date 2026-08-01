@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -21,6 +21,15 @@ class Recipe(Base):
     notes: Mapped[str | None] = mapped_column(Text)
     calories_per_serving: Mapped[int | None] = mapped_column(Integer)
     photo_filename: Mapped[str | None] = mapped_column(String(255))
+    # All source-page photos, in page order (first = title page). Fixes the
+    # multi-page orphan: previously only filenames[0] was referenced and any
+    # further pages were unreachable loose files on disk. photo_filename stays
+    # as the title-page convenience the frontend already reads.
+    photo_filenames: Mapped[list | None] = mapped_column(JSON)
+    # {"<group name as printed>": "<printed yield>"} for sub-recipes, e.g.
+    # {"goddess sauce": "1 3/4 cups"}. Consumed by the shopping list's
+    # store-bought line (quantity = yield). JSON column per Cassie 2026-07-31.
+    sub_recipe_yields: Mapped[dict | None] = mapped_column(JSON)
     dish_photo_filename: Mapped[str | None] = mapped_column(String(255))
     dish_photo_position: Mapped[str | None] = mapped_column(String(50))
     rating_cassie: Mapped[int | None] = mapped_column(Integer)

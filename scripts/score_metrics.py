@@ -184,13 +184,23 @@ def amount_values(a: str | None) -> list[float] | None:
 
 
 def _norm_text(s: str) -> str:
-    """Lowercase, collapse whitespace, strip edge punctuation per token.
+    """Lowercase, fold accents, collapse whitespace, strip edge punctuation.
 
-    DECISION (v0): this is the entire canonicalization for word comparison.
-    No unit-synonym folding (tbsp != tablespoon), no plural stripping
-    (cup != cups — the page's plurality is signal; see the wine-entry fix).
+    Accent folding (NFKD, combining marks dropped) makes "jalapeño" and
+    OCR's "jalapeno" compare equal — a diacritic is not a reading error we
+    want to score. DECISION (v0): otherwise this is the entire
+    canonicalization for word comparison. No unit-synonym folding
+    (tbsp != tablespoon), no plural stripping (cup != cups — the page's
+    plurality is signal; see the wine-entry fix).
     """
-    tokens = (re.sub(r"^\W+|\W+$", "", t) for t in s.lower().split())
+    import unicodedata
+
+    folded = "".join(
+        ch
+        for ch in unicodedata.normalize("NFKD", s)
+        if not unicodedata.combining(ch)
+    )
+    tokens = (re.sub(r"^\W+|\W+$", "", t) for t in folded.lower().split())
     return " ".join(t for t in tokens if t)
 
 

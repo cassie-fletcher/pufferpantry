@@ -158,7 +158,7 @@ ingredients:
 
   - quantity: "1"
     unit: ""
-    item: "jalapeno"
+    item: "jalapeño"
     prep: "halved and seeded"
     notes: "optional"
     group: "goddess sauce"          # only needed when not Main
@@ -219,18 +219,18 @@ cook_info:
 
 steps:
   - number: 1
-    text: "Preheat the oven to 425 degrees F"
+    text: "Preheat the oven to 425°F"
   - number: 2
     text: "On a rimmed baking sheet, toss the potatoes with 2 tablespoons of the olive oil. Season with salt and pepper. Roast until tender, about 25 minutes."
   - number: 3
     text: "Meanwhile, in a small bowl, combine the remaining 1/3 cup olive oil with the lemon juice, honey, paprika, cumin, red pepper flakes, and a pinch each of salt and pepper."
   - number: 4
-    text: "Remove the potatoes from the oven and reduce the oven temperature to 300 degrees F. Push the potatoes to one side of the baking sheet and add the salmon (skin-side down if leaving the skin on) to the other side. Pour the olive oil sauce all over the salmon. Bake until the salmon reaches your desired doneness, 10 to 20 minutes more."
+    text: "Remove the potatoes from the oven and reduce the oven temperature to 300°F. Push the potatoes to one side of the baking sheet and add the salmon (skin-side down if leaving the skin on) to the other side. Pour the olive oil sauce all over the salmon. Bake until the salmon reaches your desired doneness, 10 to 20 minutes more."
   - number: 5
     text: "To serve, arrange the potatoes, salmon, cucumbers and feta on plates. Drizzle any oil left in the pan over the top. Dollop the goddess sauce onto the potatoes and salmon. Sprinkle with the dill and basil and serve."
     # section: ""            # only for a separately-numbered sub-recipe block
   - number: 1
-    text: "In a blender or food processor, combine the avocado, jalapeno (if using), yogurt, lemon juice, cilantro, basil, cumin, a pinch of salt and 1 tablespoon of water."
+    text: "In a blender or food processor, combine the avocado, jalapeño (if using), yogurt, lemon juice, cilantro, basil, cumin, a pinch of salt and 1 tablespoon of water."
     section: "goddess sauce"
   - number: 2
     text: "Blend until smooth and creamy, adding water 1 tablespoon at a time, as needed, to thin the sauce."

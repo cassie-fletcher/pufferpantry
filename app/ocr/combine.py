@@ -97,7 +97,16 @@ def is_legible(text: str | None) -> bool:
 def _canon_text(s: str | None) -> str:
     if not s:
         return ""
-    tokens = (t.strip("\"'.,;:!?()[]{}") for t in s.lower().split())
+    # Accent folding: "jalapeño" (vision) must pair with "jalapeno"
+    # (tesseract) — a diacritic difference is not a disagreement.
+    import unicodedata
+
+    folded = "".join(
+        ch
+        for ch in unicodedata.normalize("NFKD", s)
+        if not unicodedata.combining(ch)
+    )
+    tokens = (t.strip("\"'.,;:!?()[]{}") for t in folded.lower().split())
     return " ".join(t for t in tokens if t)
 
 

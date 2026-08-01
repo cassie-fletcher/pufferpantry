@@ -92,9 +92,9 @@ script") underpins all of the above.
 
 - [ ] **Live-test URL extraction end-to-end.** The local JSON-LD reader is fully mocked-tested; run it against real HBH/skinnytaste URLs and eyeball the parsed recipes (Cassie suspects it's quite good — verify). No API involved; just real fetches.
 
-- [ ] **Fix the multi-page photo orphan.** `Recipe.photo_filename` is a single column and the upload endpoint stamps `filenames[0]`, so page 2 of a multi-page recipe is saved to disk but referenced by no DB row — undiscoverable, un-redisplayable, unmanaged. Needs a proper pages representation + Alembic migration (additive; never drop).
+- [x] **Fix the multi-page photo orphan.** DONE 2026-08-01 (photo_filenames JSON column, backfilled). `Recipe.photo_filename` is a single column and the upload endpoint stamps `filenames[0]`, so page 2 of a multi-page recipe is saved to disk but referenced by no DB row — undiscoverable, un-redisplayable, unmanaged. Needs a proper pages representation + Alembic migration (additive; never drop).
 
-- [ ] **Sub-recipe yield needs a schema/DB home.** The shopping-list design consumes it ("goddess sauce makes 1 3/4 cups" -> store-bought line quantity), parse_block currently discards MAKES lines, and groups aren't DB entities. Storage decision pending (JSON column on Recipe vs a sub-recipe table).
+- [x] **Sub-recipe yield needs a schema/DB home.** DONE 2026-08-01 (sub_recipe_yields JSON column; parse_block captures MAKES lines). The shopping-list design consumes it ("goddess sauce makes 1 3/4 cups" -> store-bought line quantity), parse_block currently discards MAKES lines, and groups aren't DB entities. Storage decision pending (JSON column on Recipe vs a sub-recipe table).
 
 - [ ] **`claude_model_fast` default is likely retired.** `claude-sonnet-4-20250514` has a published retirement date of 2026-06-15 (in the past). URL import no longer cares (local now), but pantry scans still use this setting — bump the default (current Sonnet) or set `.env`, pending Cassie's model choice. Unverified live (would need an API call).
 

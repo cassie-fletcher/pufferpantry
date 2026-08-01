@@ -1506,3 +1506,32 @@ h1 {
     grid-column: 1 / 2;
   }
 }
+
+/* Per-ingredient nutrition breakdown (spot-check view) */
+.nutrition-breakdown-toggle {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.nutrition-breakdown {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.breakdown-row {
+  display: grid;
+  grid-template-columns: 2fr 3.5rem 3rem 3fr;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.breakdown-header {
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.breakdown-miss {
+  color: var(--color-text-muted);
+  font-style: italic;
+}

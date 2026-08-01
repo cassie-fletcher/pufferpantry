@@ -30,6 +30,8 @@ function createRecipeForm({ onSubmit, onCancel, initialData = null }) {
           <option value="dinner">Dinner</option>
           <option value="lunch">Lunch</option>
           <option value="breakfast">Breakfast</option>
+          <option value="appetizer">Appetizer</option>
+          <option value="side">Side</option>
           <option value="dessert">Dessert</option>
           <option value="drinks">Drinks</option>
         </select>

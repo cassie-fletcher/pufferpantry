@@ -336,7 +336,38 @@ async function loadNutrition(recipeId, panel) {
           <span>${Math.round(ps.sodium_mg)}mg</span>
         </div>
       </div>
+      <button type="button" class="btn-link nutrition-breakdown-toggle" id="nutrition-breakdown-toggle">
+        Show per-ingredient breakdown
+      </button>
+      <div class="nutrition-breakdown hidden" id="nutrition-breakdown">
+        <div class="breakdown-row breakdown-header">
+          <span>Ingredient</span><span>grams</span><span>kcal</span><span>USDA match</span>
+        </div>
+        ${data.ingredients
+          .map((ing) => {
+            const matched = ing.nutrition !== null;
+            const kcal = matched ? Math.round(ing.nutrition.calories) : "—";
+            const match = matched ? ing.usda_match : "no match";
+            return `
+        <div class="breakdown-row${matched ? "" : " breakdown-miss"}">
+          <span>${escapeHtml(ing.name)}</span>
+          <span>${ing.grams}g</span>
+          <span>${kcal}</span>
+          <span>${escapeHtml(match)}</span>
+        </div>`;
+          })
+          .join("")}
+      </div>
     `;
+
+    const toggle = panel.querySelector("#nutrition-breakdown-toggle");
+    const breakdown = panel.querySelector("#nutrition-breakdown");
+    toggle.addEventListener("click", () => {
+      const hidden = breakdown.classList.toggle("hidden");
+      toggle.textContent = hidden
+        ? "Show per-ingredient breakdown"
+        : "Hide per-ingredient breakdown";
+    });
   } catch {
     panel.innerHTML = `
       <h3>Nutrition Facts</h3>

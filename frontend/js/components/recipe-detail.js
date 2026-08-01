@@ -310,6 +310,13 @@ async function loadNutrition(recipe, panel) {
     const response = await fetch(`/api/recipes/${recipe.id}/nutrition`);
     if (!response.ok) throw new Error("Failed to load");
     const data = await response.json();
+    if (data.computed === false) {
+      panel.innerHTML = `
+        <h3>Nutrition Facts</h3>
+        <p class="text-muted">Not computed yet — will fill when the recipe is next saved.</p>
+      `;
+      return;
+    }
     const range = recipe.servings_range;
 
     const render = (n) => {

@@ -14,15 +14,13 @@ from app.schemas.recipe import (
     UrlExtractRequest,
 )
 from app.services import recipe_service
-from app.services.nutrition_service import (
-    compute_nutrition_facts,
-    derive_nutrition_view,
-)
+from app.services.nutrition_service import derive_nutrition_view
 # extract_recipe_from_photos (the Claude photo path) is deliberately no
 # longer imported: photo extraction runs the local ensemble. The Claude code
 # stays in photo_service as a dormant backup, wired to nothing.
 from app.services.photo_service import PHOTOS_DIR, save_photo
 from app.services.shopping_service import generate_shopping_list
+from app.services.tag_service import infer_protein
 from app.services.url_service import extract_recipe_from_url
 
 logger = logging.getLogger(__name__)
@@ -80,6 +78,11 @@ def extract_from_photo(photos: list[UploadFile] = File(...)):
     recipe["photo_filename"] = filenames[0]     # title page (starred first)
     recipe["photo_filenames"] = filenames       # ALL pages, in order — no orphans
     recipe.setdefault("meal_type", "dinner")
+    # Protein inferred from title/ingredients (Cassie's rule). Cuisine has no
+    # local source on a photographed page and stays blank for her review.
+    recipe["protein_type"] = infer_protein(
+        recipe.get("title"), [i["name"] for i in recipe.get("ingredients", [])]
+    )
 
     # Return array — the frontend's review flow expects one; kept as an array
     # for compatibility with the old multi-recipe Claude response shape.
@@ -124,34 +127,24 @@ def create_shopping_list(body: dict, db: Session = Depends(get_db)):
 
 @router.get("/{recipe_id}/nutrition")
 def get_recipe_nutrition(recipe_id: int, db: Session = Depends(get_db)):
-    """Return the recipe's STORED nutrition facts.
+    """Return the recipe's STORED nutrition facts. NEVER calls the USDA API.
 
-    Computation happens at save time, not here (Cassie's rule: the calorie
-    API is called once at upload). The one exception: when the stored result
-    is missing or has zero calories (e.g. the USDA quota was exhausted when
-    the recipe was saved), recompute once now and store it — a lazy fill,
-    not a per-view call.
+    Cassie's rule, verbatim: the calorie API is called ONLY ONCE, when the
+    recipe is saved (and silently on ingredient edits). Viewing performs
+    arithmetic on stored facts and nothing else. A recipe whose facts were
+    never computed (saved before this feature, or saved during quota
+    exhaustion) reports computed=false; its facts fill on its next
+    ingredient edit/save — no automatic API spend, ever, from a view.
     """
     recipe = recipe_service.get_recipe(db, recipe_id)
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
 
     stored = recipe.nutrition
-    if stored and any(f.get("per_100g") for f in stored.get("ingredients", [])):
-        return derive_nutrition_view(stored, recipe.servings)
-
-    # Lazy fill: stored facts are absent or all-miss (quota exhausted at
-    # save time). One recompute attempt; store only if something matched.
-    ingredients = [
-        {"name": i.name, "amount": i.amount, "unit": i.unit}
-        for i in recipe.ingredients
-    ]
-    facts = compute_nutrition_facts(ingredients)
-    view = derive_nutrition_view(facts, recipe.servings)
-    if any(f.get("per_100g") for f in facts["ingredients"]):
-        recipe.nutrition = facts
-        recipe.calories_per_serving = round(view["per_serving"]["calories"]) or recipe.calories_per_serving
-        db.commit()
+    if not stored:
+        return {"computed": False, "servings": recipe.servings}
+    view = derive_nutrition_view(stored, recipe.servings)
+    view["computed"] = True
     return view
 
 

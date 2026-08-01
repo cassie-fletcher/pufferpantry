@@ -97,3 +97,17 @@ def test_determinism():
     a = _map_json_ld(_json_ld_recipes(PAGE)[0])
     b = _map_json_ld(_json_ld_recipes(PAGE)[0])
     assert a == b
+
+
+def test_protein_inferred_from_title():
+    mapped = _map_json_ld(_json_ld_recipes(PAGE)[0])
+    assert mapped["protein_type"] == "chicken"  # "Chipotle Chicken Enchiladas"
+
+
+def test_cuisine_falls_back_to_keywords():
+    import json as _json
+
+    recipe = _json_ld_recipes(PAGE)[0].copy()
+    recipe.pop("recipeCuisine", None)
+    recipe["keywords"] = "weeknight, asian, sesame"
+    assert _map_json_ld(recipe)["cuisine"] == "Asian"

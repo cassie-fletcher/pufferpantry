@@ -182,3 +182,17 @@ def test_full_round_trip(mock_read, client):
     assert recipe["source_type"] == "cookbook"
     assert recipe["photo_filename"].endswith(".jpg")
     assert len(recipe["ingredients"]) == 4
+
+
+@patch("app.routers.recipes.read_image")
+def test_photo_extraction_infers_protein(mock_read, client):
+    """Protein comes from title/ingredients locally; cuisine stays blank."""
+    mock_read.side_effect = lambda paths, method: _fake_reading(method)
+    img_buf = _make_test_image()
+    response = client.post(
+        "/api/recipes/extract-from-photo",
+        files={"photos": ("test.jpg", img_buf, "image/jpeg")},
+    )
+    data = response.json()[0]
+    assert data["protein_type"] == "salmon"  # "Honey Garlic Salmon"
+    assert data.get("cuisine") is None

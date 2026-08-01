@@ -237,6 +237,7 @@ from app.ocr.resolve import (  # noqa: PLC2701 - engine-free helpers, see commen
     _normalize_fractions,
 )
 from app.schemas.recipe import IngredientCreate
+from app.services.tag_service import infer_cuisine_from_keywords, infer_protein
 
 
 def _json_ld_recipes(page_html: str) -> list[dict]:
@@ -347,9 +348,20 @@ def _map_json_ld(recipe: dict) -> dict:
     cuisine = recipe.get("recipeCuisine")
     if isinstance(cuisine, list):
         cuisine = cuisine[0] if cuisine else None
+    if not cuisine:
+        # Fall back to the site's keyword metadata (Cassie: "look at the
+        # site for keywords"). keywords is a string or list per schema.org.
+        keywords = recipe.get("keywords")
+        if isinstance(keywords, list):
+            keywords = ", ".join(str(k) for k in keywords)
+        cuisine = infer_cuisine_from_keywords(keywords)
 
+    title = str(recipe.get("name", "")).strip() or "Untitled recipe"
     return {
-        "title": str(recipe.get("name", "")).strip() or "Untitled recipe",
+        "title": title,
+        "protein_type": infer_protein(
+            title, [i.name for i in ingredients]
+        ),
         "servings": _first_int(recipe.get("recipeYield", "")) or 2,
         "servings_range": _int_range(recipe.get("recipeYield", "")),
         "instructions": "\n\n".join(numbered) if numbered else None,

@@ -34,6 +34,12 @@ class Recipe(Base):
     # {"goddess sauce": "1 3/4 cups"}. Consumed by the shopping list's
     # store-bought line (quantity = yield). JSON column per Cassie 2026-07-31.
     sub_recipe_yields: Mapped[dict | None] = mapped_column(JSON)
+    # Full USDA-computed nutrition (totals, per-serving, per-ingredient
+    # breakdown), computed ONCE at save and on ingredient edits — never on
+    # view (Cassie: the calorie API is called once at upload; views read
+    # stored data; recompute happens lazily only when stored calories are
+    # zero/absent).
+    nutrition: Mapped[dict | None] = mapped_column(JSON)
     dish_photo_filename: Mapped[str | None] = mapped_column(String(255))
     dish_photo_position: Mapped[str | None] = mapped_column(String(50))
     rating_cassie: Mapped[int | None] = mapped_column(Integer)

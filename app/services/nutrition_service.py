@@ -140,55 +140,70 @@ def _parse_amount_grams(amount: str | None, unit: str | None) -> float:
     return numeric * grams_per_unit
 
 
-def calculate_recipe_nutrition(ingredients: list, servings: int = 2) -> dict:
-    """Calculate total and per-serving nutrition for a list of ingredients.
+def compute_nutrition_facts(ingredients: list) -> dict:
+    """The INDEPENDENT nutrition facts for a recipe, and nothing derived.
 
-    Each ingredient should have: name, amount (str|None), unit (str|None).
+    Stored shape (one USDA API pass, done at save time):
+        {"ingredients": [{"name", "grams", "usda_match", "per_100g"}]}
+    per_100g is the USDA per-100g nutrient dict, or None on a miss.
+    Everything else — per-ingredient contribution, recipe totals, per-serving
+    at any serving count — is arithmetic on these facts (derive_nutrition_view)
+    and is deliberately NOT stored, so nothing can drift.
     """
-    totals = {k: 0.0 for k in NUTRIENT_KEYS.values()}
-    ingredient_details = []
-
+    facts = []
     for ing in ingredients:
         if isinstance(ing, dict):
-            name = ing.get("name", "")
-            amount = ing.get("amount")
-            unit = ing.get("unit")
+            name, amount, unit = ing.get("name", ""), ing.get("amount"), ing.get("unit")
         else:
             name = getattr(ing, "name", str(ing))
             amount = getattr(ing, "amount", None)
             unit = getattr(ing, "unit", None)
-
         nutrition = lookup_ingredient_nutrition(name)
-        grams = _parse_amount_grams(amount, unit)
+        per_100g = (
+            {k: v for k, v in nutrition.items() if k != "usda_description"}
+            if nutrition
+            else None
+        )
+        facts.append(
+            {
+                "name": name,
+                "grams": round(_parse_amount_grams(amount, unit)),
+                "usda_match": nutrition.get("usda_description") if nutrition else None,
+                "per_100g": per_100g,
+            }
+        )
+    return {"ingredients": facts}
 
-        detail = {"name": name, "grams": round(grams)}
 
-        if nutrition:
-            # USDA data is per 100g, so scale by actual grams
-            scale = grams / 100.0
-            ing_nutrients = {}
+def derive_nutrition_view(facts: dict, servings: int) -> dict:
+    """Expand stored facts into the response shape the frontend renders.
+
+    Pure arithmetic — no API, no storage. Matches the historical response
+    contract: {servings, total, per_serving, ingredients:[{name, grams,
+    nutrition|None, usda_match}]}.
+    """
+    totals = {k: 0.0 for k in NUTRIENT_KEYS.values()}
+    details = []
+    for f in facts.get("ingredients", []):
+        detail = {"name": f["name"], "grams": f["grams"], "usda_match": f["usda_match"]}
+        if f.get("per_100g"):
+            scale = f["grams"] / 100.0
+            contribution = {}
             for key in NUTRIENT_KEYS.values():
-                val = nutrition.get(key, 0) * scale
-                ing_nutrients[key] = round(val, 1)
+                val = f["per_100g"].get(key, 0) * scale
+                contribution[key] = round(val, 1)
                 totals[key] += val
-            detail["nutrition"] = ing_nutrients
-            detail["usda_match"] = nutrition.get("usda_description", "")
+            detail["nutrition"] = contribution
         else:
             detail["nutrition"] = None
-            detail["usda_match"] = None
-
-        ingredient_details.append(detail)
-
-    # Round totals
-    for key in totals:
-        totals[key] = round(totals[key], 1)
-
-    # Per-serving
-    per_serving = {key: round(val / max(servings, 1), 1) for key, val in totals.items()}
-
+        details.append(detail)
+    totals = {k: round(v, 1) for k, v in totals.items()}
+    per_serving = {k: round(v / max(servings, 1), 1) for k, v in totals.items()}
     return {
         "servings": servings,
         "total": totals,
         "per_serving": per_serving,
-        "ingredients": ingredient_details,
+        "ingredients": details,
     }
+
+

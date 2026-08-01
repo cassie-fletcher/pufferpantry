@@ -116,7 +116,7 @@ function createRecipeDetail(recipe, { onEdit, onClose, onUploadDishPhoto }) {
   });
 
   // --- Nutrition facts --- load asynchronously
-  loadNutrition(recipe.id, container.querySelector("#nutrition-panel"));
+  loadNutrition(recipe, container.querySelector("#nutrition-panel"));
 
   // Photo upload
   const fileInput = document.createElement("input");
@@ -299,17 +299,55 @@ function buildRatingNumbers(currentValue) {
 }
 
 
-/** Fetch and render nutrition facts into the panel element. */
-async function loadNutrition(recipeId, panel) {
+/** Fetch and render nutrition facts into the panel element.
+
+    Per-serving numbers are STORED TOTALS divided by a serving count — pure
+    arithmetic, no API. When the recipe declares a servings RANGE ("serves
+    4 to 6"), the count used is explicit (asterisk) and adjustable: picking
+    a different N just re-divides the stored totals client-side. */
+async function loadNutrition(recipe, panel) {
   try {
-    const response = await fetch(`/api/recipes/${recipeId}/nutrition`);
+    const response = await fetch(`/api/recipes/${recipe.id}/nutrition`);
     if (!response.ok) throw new Error("Failed to load");
     const data = await response.json();
-    const ps = data.per_serving;
+    const range = recipe.servings_range;
+
+    const render = (n) => {
+      const ps = {};
+      for (const [key, val] of Object.entries(data.total)) {
+        ps[key] = val / Math.max(n, 1);
+      }
+      renderNutrition(panel, data, ps, n, range, render);
+    };
+    render(data.servings);
+  } catch {
+    panel.innerHTML = `
+      <h3>Nutrition Facts</h3>
+      <p class="text-muted">Could not load nutrition data.</p>
+    `;
+  }
+}
+
+function rangeOptions(range, selected) {
+  const opts = [];
+  for (let n = range[0]; n <= range[1]; n++) {
+    opts.push(`<option value="${n}"${n === selected ? " selected" : ""}>${n}</option>`);
+  }
+  return opts.join("");
+}
+
+function renderNutrition(panel, data, ps, servingCount, range, rerender) {
+  const rangeNote = range
+    ? `<p class="nutrition-subtitle nutrition-range-note">* recipe serves ${range[0]}&ndash;${range[1]};
+         counts computed at
+         <select id="nutrition-servings-select">${rangeOptions(range, servingCount)}</select>
+         servings</p>`
+    : "";
 
     panel.innerHTML = `
       <h3>Nutrition Facts</h3>
-      <p class="nutrition-subtitle">Per serving (${data.servings} servings) &middot; Estimate</p>
+      <p class="nutrition-subtitle">Per serving (${servingCount} servings${range ? "*" : ""}) &middot; Estimate</p>
+      ${rangeNote}
       <div class="nutrition-table">
         <div class="nutrition-row nutrition-calories">
           <span>Calories</span>
@@ -368,10 +406,8 @@ async function loadNutrition(recipeId, panel) {
         ? "Show per-ingredient breakdown"
         : "Hide per-ingredient breakdown";
     });
-  } catch {
-    panel.innerHTML = `
-      <h3>Nutrition Facts</h3>
-      <p class="text-muted">Could not load nutrition data.</p>
-    `;
-  }
+    const select = panel.querySelector("#nutrition-servings-select");
+    if (select) {
+      select.addEventListener("change", () => rerender(parseInt(select.value, 10)));
+    }
 }

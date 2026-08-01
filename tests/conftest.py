@@ -72,3 +72,15 @@ def sample_recipe():
             {"name": "olive oil", "amount": "2", "unit": "tbsp", "order": 2},
         ],
     }
+
+
+@pytest.fixture(autouse=True)
+def _no_usda_api(monkeypatch):
+    """No test may spend USDA API quota (it is Cassie's, and DEMO_KEY allows
+    10 requests/hour). create/update now compute nutrition at save, so this
+    autouse guard stubs the lookup everywhere: every ingredient 'misses',
+    which exercises the stored-zero/lazy-fill paths without any network."""
+    monkeypatch.setattr(
+        "app.services.nutrition_service.lookup_ingredient_nutrition",
+        lambda name: None,
+    )

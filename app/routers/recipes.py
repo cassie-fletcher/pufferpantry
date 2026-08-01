@@ -14,7 +14,10 @@ from app.schemas.recipe import (
     UrlExtractRequest,
 )
 from app.services import recipe_service
-from app.services.nutrition_service import calculate_recipe_nutrition
+from app.services.nutrition_service import (
+    compute_nutrition_facts,
+    derive_nutrition_view,
+)
 # extract_recipe_from_photos (the Claude photo path) is deliberately no
 # longer imported: photo extraction runs the local ensemble. The Claude code
 # stays in photo_service as a dormant backup, wired to nothing.
@@ -121,15 +124,35 @@ def create_shopping_list(body: dict, db: Session = Depends(get_db)):
 
 @router.get("/{recipe_id}/nutrition")
 def get_recipe_nutrition(recipe_id: int, db: Session = Depends(get_db)):
-    """Calculate nutrition facts for a recipe from USDA data."""
+    """Return the recipe's STORED nutrition facts.
+
+    Computation happens at save time, not here (Cassie's rule: the calorie
+    API is called once at upload). The one exception: when the stored result
+    is missing or has zero calories (e.g. the USDA quota was exhausted when
+    the recipe was saved), recompute once now and store it — a lazy fill,
+    not a per-view call.
+    """
     recipe = recipe_service.get_recipe(db, recipe_id)
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
+
+    stored = recipe.nutrition
+    if stored and any(f.get("per_100g") for f in stored.get("ingredients", [])):
+        return derive_nutrition_view(stored, recipe.servings)
+
+    # Lazy fill: stored facts are absent or all-miss (quota exhausted at
+    # save time). One recompute attempt; store only if something matched.
     ingredients = [
-        {"name": ing.name, "amount": ing.amount, "unit": ing.unit}
-        for ing in recipe.ingredients
+        {"name": i.name, "amount": i.amount, "unit": i.unit}
+        for i in recipe.ingredients
     ]
-    return calculate_recipe_nutrition(ingredients, recipe.servings)
+    facts = compute_nutrition_facts(ingredients)
+    view = derive_nutrition_view(facts, recipe.servings)
+    if any(f.get("per_100g") for f in facts["ingredients"]):
+        recipe.nutrition = facts
+        recipe.calories_per_serving = round(view["per_serving"]["calories"]) or recipe.calories_per_serving
+        db.commit()
+    return view
 
 
 @router.get("/{recipe_id}", response_model=RecipeRead)

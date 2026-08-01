@@ -1,6 +1,10 @@
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.recipe import Ingredient, Recipe
+from app.services.nutrition_service import (
+    compute_nutrition_facts,
+    derive_nutrition_view,
+)
 from app.schemas.recipe import RecipeCreate, RecipeUpdate
 
 
@@ -39,10 +43,34 @@ def create_recipe(db: Session, data: RecipeCreate) -> Recipe:
         recipe.ingredients.append(
             Ingredient(name=ing.name, amount=ing.amount, unit=ing.unit, order=ing.order, group=ing.group, category=ing.category)
         )
+    _compute_and_store_nutrition(recipe)
     db.add(recipe)
     db.commit()
     db.refresh(recipe)
     return recipe
+
+
+def _compute_and_store_nutrition(recipe: Recipe) -> None:
+    """Compute nutrition ONCE and store it on the recipe.
+
+    Called at create and after ingredient edits — never from the view path.
+    When the computed calories come out nonzero, our count also becomes the
+    displayed calories_per_serving (Cassie: website calorie claims are
+    unreliable; we show our work, so our number wins). A zero/empty result
+    (e.g. the USDA quota was exhausted at save time) is stored as-is; the
+    nutrition endpoint lazily recomputes when it sees stored calories of
+    zero.
+    """
+    ingredients = [
+        {"name": i.name, "amount": i.amount, "unit": i.unit}
+        for i in recipe.ingredients
+    ]
+    facts = compute_nutrition_facts(ingredients)
+    recipe.nutrition = facts
+    view = derive_nutrition_view(facts, recipe.servings or 2)
+    computed = round(view["per_serving"]["calories"])
+    if computed > 0:
+        recipe.calories_per_serving = computed
 
 
 def update_recipe(db: Session, recipe_id: int, data: RecipeUpdate) -> Recipe | None:
@@ -64,6 +92,9 @@ def update_recipe(db: Session, recipe_id: int, data: RecipeUpdate) -> Recipe | N
             recipe.ingredients.append(
                 Ingredient(name=ing["name"], amount=ing["amount"], unit=ing["unit"], order=ing["order"], group=ing.get("group", "Main"), category=ing.get("category"))
             )
+        # Ingredients changed -> silently recompute the stored nutrition
+        # (Cassie's rule: once per change, never on view).
+        _compute_and_store_nutrition(recipe)
 
     db.commit()
     db.refresh(recipe)

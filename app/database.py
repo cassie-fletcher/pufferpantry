@@ -63,3 +63,5 @@ def _ensure_recipe_columns() -> None:
             conn.execute(text("ALTER TABLE recipes ADD COLUMN sub_recipe_yields JSON"))
         if "servings_range" not in existing:
             conn.execute(text("ALTER TABLE recipes ADD COLUMN servings_range JSON"))
+        if "nutrition" not in existing:
+            conn.execute(text("ALTER TABLE recipes ADD COLUMN nutrition JSON"))

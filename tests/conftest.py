@@ -84,3 +84,7 @@ def _no_usda_api(monkeypatch):
         "app.services.nutrition_service.lookup_ingredient_nutrition",
         lambda name: None,
     )
+    monkeypatch.setattr(
+        "app.services.nutrition_service.lookup_serving_grams",
+        lambda fdc_id: None,
+    )

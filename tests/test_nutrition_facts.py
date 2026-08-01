@@ -45,3 +45,55 @@ def test_miss_only_facts_derive_to_zero():
         {"name": "x", "grams": 50, "usda_match": None, "per_100g": None},
     ]}
     assert derive_nutrition_view(facts, 4)["per_serving"]["calories"] == 0.0
+
+
+def test_amount_parsing_sums_all_terms():
+    from app.services.nutrition_service import _amount_to_number
+
+    assert _amount_to_number("1 1/2") == 1.5     # the dropped-term bug, fixed
+    assert _amount_to_number("1½") == 1.5
+    assert _amount_to_number("1-2") == 1.5       # range -> midpoint
+    assert _amount_to_number("1 to 2") == 1.5
+    assert _amount_to_number("to taste") is None
+
+
+def test_quantityless_uses_usda_serving_weight():
+    from app.services.nutrition_service import compute_nutrition_facts
+
+    with patch(
+        "app.services.nutrition_service.lookup_ingredient_nutrition",
+        return_value={**PER_100G, "usda_description": "Avocados, raw", "fdc_id": 111},
+    ), patch(
+        "app.services.nutrition_service.lookup_serving_grams",
+        return_value=201.0,
+    ) as serving:
+        facts = compute_nutrition_facts([{"name": "avocado", "amount": "1", "unit": None}])
+    serving.assert_called_once_with(111)
+    assert facts["ingredients"][0]["grams"] == 201   # 1 x one USDA serving
+
+
+def test_countable_multiplies_serving_weight():
+    from app.services.nutrition_service import compute_nutrition_facts
+
+    with patch(
+        "app.services.nutrition_service.lookup_ingredient_nutrition",
+        return_value={**PER_100G, "usda_description": "Lemons, raw", "fdc_id": 222},
+    ), patch(
+        "app.services.nutrition_service.lookup_serving_grams",
+        return_value=58.0,
+    ):
+        facts = compute_nutrition_facts([{"name": "lemons", "amount": "2", "unit": None}])
+    assert facts["ingredients"][0]["grams"] == 116   # 2 x one lemon
+
+
+def test_unit_path_makes_no_detail_call():
+    from app.services.nutrition_service import compute_nutrition_facts
+
+    with patch(
+        "app.services.nutrition_service.lookup_ingredient_nutrition",
+        return_value={**PER_100G, "usda_description": "Salmon, raw", "fdc_id": 333},
+    ), patch(
+        "app.services.nutrition_service.lookup_serving_grams"
+    ) as serving:
+        compute_nutrition_facts([{"name": "salmon", "amount": "1 1/2", "unit": "pounds"}])
+    serving.assert_not_called()  # detail calls ONLY for unit-less ingredients

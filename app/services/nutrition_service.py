@@ -9,6 +9,8 @@ These are estimates — good enough for meal planning, not for medical use.
 import logging
 from functools import lru_cache
 
+import re
+
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -111,33 +113,114 @@ def lookup_ingredient_nutrition(name: str) -> dict | None:
         return None
 
     nutrients["usda_description"] = food.get("description", name)
+    nutrients["fdc_id"] = food.get("fdcId")
     return nutrients
 
 
-def _parse_amount_grams(amount: str | None, unit: str | None) -> float:
-    """Convert an amount + unit to approximate grams."""
-    # Parse the numeric amount
-    numeric = 1.0
-    if amount:
-        try:
-            # Handle fractions like "1/2"
-            if "/" in amount:
-                parts = amount.split("/")
-                numeric = float(parts[0]) / float(parts[1])
-            else:
-                numeric = float(amount)
-        except (ValueError, ZeroDivisionError):
-            numeric = 1.0
+USDA_FOOD_DETAIL_URL = "https://api.nal.usda.gov/fdc/v1/food/{fdc_id}"
 
-    # Convert unit to grams
+
+@lru_cache(maxsize=200)
+def lookup_serving_grams(fdc_id: int | None) -> float | None:
+    """The gram weight of ONE household serving of a food (USDA foodPortions).
+
+    One extra API call, made only for quantity-less ingredients and only at
+    recipe save (Cassie's rule: default such ingredients to one serving of
+    that thing). Uses the FIRST listed portion — USDA orders portions with
+    the customary household measure first. None when the food has no
+    portions or the call fails; the caller falls back to DEFAULT_GRAMS.
+    """
+    if not fdc_id:
+        return None
+    try:
+        response = httpx.get(
+            USDA_FOOD_DETAIL_URL.format(fdc_id=fdc_id),
+            params={"api_key": USDA_API_KEY},
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except Exception:
+        logger.warning("USDA detail lookup failed for fdc_id=%s", fdc_id)
+        return None
+    for portion in data.get("foodPortions", []):
+        grams = portion.get("gramWeight")
+        if grams:
+            return float(grams)
+    return None
+
+
+# Range separators for amounts like "1-2", "1 to 2". A range becomes its
+# MIDPOINT (Cassie 2026-08-01): a single grams number is needed and the
+# midpoint is the least-wrong point estimate for a calorie count.
+_AMOUNT_RANGE_SPLIT_RE = re.compile(r"\s*(?:-|–|—|\bto\b)\s*", re.IGNORECASE)
+_UNICODE_FRACTION_VALUES = {
+    "½": 0.5, "⅓": 1 / 3, "⅔": 2 / 3, "¼": 0.25, "¾": 0.75,
+    "⅕": 0.2, "⅖": 0.4, "⅗": 0.6, "⅘": 0.8, "⅙": 1 / 6, "⅚": 5 / 6,
+    "⅛": 0.125, "⅜": 0.375, "⅝": 0.625, "⅞": 0.875,
+}
+
+
+def _amount_to_number(amount: str | None) -> float | None:
+    """Parse an amount string to a number, SUMMING every term.
+
+    "1 1/2" -> 1.5 (the old parser dropped the fraction and used 1.0 --
+    measured: the salmon undercounted by a third). Handles bare fractions,
+    decimals, unicode glyphs ("1½"), and ranges via midpoint. None when the
+    string has no parseable number ("to taste").
+    """
+    if not amount or not amount.strip():
+        return None
+
+    def one_value(text: str) -> float | None:
+        total, seen = 0.0, False
+        for glyph, val in _UNICODE_FRACTION_VALUES.items():
+            if glyph in text:
+                total += val
+                text = text.replace(glyph, " ")
+                seen = True
+        for part in text.split():
+            try:
+                if "/" in part:
+                    num, den = part.split("/", 1)
+                    total += float(num) / float(den)
+                else:
+                    total += float(part)
+                seen = True
+            except (ValueError, ZeroDivisionError):
+                continue
+        return total if seen else None
+
+    pieces = [p for p in _AMOUNT_RANGE_SPLIT_RE.split(amount.strip()) if p]
+    values = [v for v in (one_value(p) for p in pieces) if v is not None]
+    if not values:
+        return None
+    if len(values) >= 2:
+        return (min(values) + max(values)) / 2.0  # range midpoint
+    return values[0]
+
+
+def _parse_amount_grams(
+    amount: str | None, unit: str | None, fdc_id: int | None = None
+) -> float:
+    """Convert an amount + unit to approximate grams.
+
+    With a unit: parsed amount x grams-per-unit (UNIT_TO_GRAMS).
+    Without a unit: the item is countable ("2 lemons") or quantity-less
+    ("salt") — either way, one item = one USDA household serving
+    (lookup_serving_grams; one detail API call, save-time only), falling
+    back to DEFAULT_GRAMS when the food has no portion data.
+    """
+    numeric = _amount_to_number(amount)
+
     if unit:
         unit_lower = unit.lower().strip().rstrip(".")
         grams_per_unit = UNIT_TO_GRAMS.get(unit_lower, DEFAULT_GRAMS)
-    else:
-        # No unit — assume it's a countable item (e.g., "2 eggs")
-        grams_per_unit = DEFAULT_GRAMS
+        return (numeric if numeric is not None else 1.0) * grams_per_unit
 
-    return numeric * grams_per_unit
+    serving = lookup_serving_grams(fdc_id)
+    grams_per_item = serving if serving else DEFAULT_GRAMS
+    return (numeric if numeric is not None else 1.0) * grams_per_item
 
 
 def compute_nutrition_facts(ingredients: list) -> dict:
@@ -160,14 +243,22 @@ def compute_nutrition_facts(ingredients: list) -> dict:
             unit = getattr(ing, "unit", None)
         nutrition = lookup_ingredient_nutrition(name)
         per_100g = (
-            {k: v for k, v in nutrition.items() if k != "usda_description"}
+            {
+                k: v
+                for k, v in nutrition.items()
+                if k not in ("usda_description", "fdc_id")
+            }
             if nutrition
             else None
         )
         facts.append(
             {
                 "name": name,
-                "grams": round(_parse_amount_grams(amount, unit)),
+                "grams": round(
+                    _parse_amount_grams(
+                        amount, unit, nutrition.get("fdc_id") if nutrition else None
+                    )
+                ),
                 "usda_match": nutrition.get("usda_description") if nutrition else None,
                 "per_100g": per_100g,
             }

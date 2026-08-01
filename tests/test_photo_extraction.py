@@ -43,18 +43,26 @@ def _mock_claude_response(response_text: str) -> MagicMock:
     return mock_message
 
 
-@patch("app.services.photo_service.settings")
-@patch("app.services.photo_service.Anthropic")
-def test_extract_from_photo(mock_anthropic_cls, mock_settings, client, tmp_path):
-    """Upload a photo and get extracted recipe data back."""
-    mock_settings.anthropic_api_key = "sk-ant-test-key"
+def _fake_reading(method="apple_vision"):
+    """A canned local-ensemble Reading matching SAMPLE_CLAUDE_RESPONSE."""
+    from app.ocr.base import Reading
+    from app.schemas.recipe import PhotoExtractResult
 
-    # Mock Claude to return our sample recipe
-    mock_client = MagicMock()
-    mock_anthropic_cls.return_value = mock_client
-    mock_client.messages.create.return_value = _mock_claude_response(
-        json.dumps(SAMPLE_CLAUDE_RESPONSE)
+    payload = {k: v for k, v in SAMPLE_CLAUDE_RESPONSE.items()}
+    payload["photo_filename"] = "placeholder.jpg"
+    return Reading(
+        method=method, schema=PhotoExtractResult(**payload), raw_text="raw"
     )
+
+
+@patch("app.routers.recipes.read_image")
+def test_extract_from_photo(mock_read, client, tmp_path):
+    """Upload a photo -> the LOCAL ensemble reads it -> review data back.
+
+    read_image is mocked at the router boundary: endpoint tests exercise the
+    route contract, not the OCR engines (which need a built Vision binary
+    and are covered by their own tests)."""
+    mock_read.side_effect = lambda paths, method: _fake_reading(method)
 
     # Upload a test image
     img_buf = _make_test_image()
@@ -72,80 +80,78 @@ def test_extract_from_photo(mock_anthropic_cls, mock_settings, client, tmp_path)
     assert data["calories_per_serving"] == 420
     assert len(data["ingredients"]) == 4
     assert data["ingredients"][0]["name"] == "salmon fillets"
+    # ROVER flags ride the response: both fake voters agreed on everything
+    assert data["ingredients"][0]["amount_confidence"] == "high"
     assert data["photo_filename"].endswith(".jpg")
+    assert data["photo_filenames"][0].endswith(".jpg")  # all pages recorded
     assert data["meal_type"] == "dinner"
 
 
 @patch("app.services.photo_service.settings")
 @patch("app.services.photo_service.Anthropic")
-def test_extract_handles_markdown_fences(mock_anthropic_cls, mock_settings, client):
-    """Claude sometimes wraps JSON in markdown code fences — we should handle that."""
-    mock_settings.anthropic_api_key = "sk-ant-test-key"
+def test_backup_claude_handles_markdown_fences(mock_anthropic_cls, mock_settings, tmp_path):
+    """The DORMANT Claude backup still parses fenced JSON (kept honest even
+    though the endpoint no longer calls it)."""
+    from app.services.photo_service import extract_recipe_from_photos
 
+    mock_settings.anthropic_api_key = "sk-ant-test-key"
     mock_client = MagicMock()
     mock_anthropic_cls.return_value = mock_client
-    # Wrap the JSON in markdown fences
     fenced_json = "```json\n" + json.dumps(SAMPLE_CLAUDE_RESPONSE) + "\n```"
     mock_client.messages.create.return_value = _mock_claude_response(fenced_json)
 
-    img_buf = _make_test_image()
-    response = client.post(
-        "/api/recipes/extract-from-photo",
-        files={"photos": ("test.jpg", img_buf, "image/jpeg")},
-    )
-
-    assert response.status_code == 200
-    assert response.json()[0]["title"] == "Honey Garlic Salmon"
+    img = tmp_path / "t.jpg"
+    img.write_bytes(_make_test_image().getvalue())
+    result = extract_recipe_from_photos([img])
+    recipes = result if isinstance(result, list) else [result]
+    assert recipes[0]["title"] == "Honey Garlic Salmon"
 
 
 @patch("app.services.photo_service.settings")
 @patch("app.services.photo_service.Anthropic")
-def test_extract_bad_json_returns_422(mock_anthropic_cls, mock_settings, client):
-    """If Claude returns unparseable text, we should get a clear error."""
-    mock_settings.anthropic_api_key = "sk-ant-test-key"
+def test_backup_claude_bad_json_raises(mock_anthropic_cls, mock_settings, tmp_path):
+    """The dormant backup raises a clear 422 on unparseable text."""
+    import pytest
+    from fastapi import HTTPException
 
+    from app.services.photo_service import extract_recipe_from_photos
+
+    mock_settings.anthropic_api_key = "sk-ant-test-key"
     mock_client = MagicMock()
     mock_anthropic_cls.return_value = mock_client
     mock_client.messages.create.return_value = _mock_claude_response(
         "I can see a recipe but I'm not sure about the ingredients..."
     )
 
-    img_buf = _make_test_image()
-    response = client.post(
-        "/api/recipes/extract-from-photo",
-        files={"photos": ("test.jpg", img_buf, "image/jpeg")},
-    )
-
-    assert response.status_code == 422
-    assert "parse" in response.json()["detail"].lower()
+    img = tmp_path / "t.jpg"
+    img.write_bytes(_make_test_image().getvalue())
+    with pytest.raises(HTTPException) as exc:
+        extract_recipe_from_photos([img])
+    assert exc.value.status_code == 422
 
 
 @patch("app.services.photo_service.settings")
-def test_extract_no_api_key(mock_settings, client):
-    """Should return a helpful error if the API key isn't configured."""
+def test_backup_claude_no_api_key(mock_settings, tmp_path):
+    """The dormant backup fails loudly without a key. The ENDPOINT no longer
+    needs a key at all — extraction is local."""
+    import pytest
+    from fastapi import HTTPException
+
+    from app.services.photo_service import extract_recipe_from_photos
+
     mock_settings.anthropic_api_key = ""
-
-    img_buf = _make_test_image()
-    response = client.post(
-        "/api/recipes/extract-from-photo",
-        files={"photos": ("test.jpg", img_buf, "image/jpeg")},
-    )
-
-    assert response.status_code == 500
-    assert "API key" in response.json()["detail"]
+    img = tmp_path / "t.jpg"
+    img.write_bytes(_make_test_image().getvalue())
+    with pytest.raises(HTTPException) as exc:
+        extract_recipe_from_photos([img])
+    assert exc.value.status_code == 500
+    assert "API key" in exc.value.detail
 
 
-@patch("app.services.photo_service.settings")
-@patch("app.services.photo_service.Anthropic")
-def test_full_round_trip(mock_anthropic_cls, mock_settings, client):
-    """Extract from photo, then save the recipe — full workflow."""
-    mock_settings.anthropic_api_key = "sk-ant-test-key"
-
-    mock_client = MagicMock()
-    mock_anthropic_cls.return_value = mock_client
-    mock_client.messages.create.return_value = _mock_claude_response(
-        json.dumps(SAMPLE_CLAUDE_RESPONSE)
-    )
+@patch("app.routers.recipes.read_image")
+def test_full_round_trip(mock_read, client):
+    """Extract via the local ensemble, then save the recipe — full workflow."""
+    mock_read.side_effect = lambda paths, method: _fake_reading(method)
 
     # Step 1: Extract from photo
     img_buf = _make_test_image()

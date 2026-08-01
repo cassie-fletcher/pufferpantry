@@ -261,7 +261,12 @@ def _vote_whole_field(readings: list[Reading], getter) -> object:
             continue
         if isinstance(value, str) and not is_legible(value):
             continue
-        key = _canon_text(value) if isinstance(value, str) else value
+        if isinstance(value, str):
+            key = _canon_text(value)
+        elif isinstance(value, list):
+            key = tuple(value)  # lists (servings_range) are unhashable as-is
+        else:
+            key = value
         candidates.append((r.method, value, key))
     value, _ = _vote(candidates)
     return value if value is not None else getter(readings[0].schema)
@@ -284,6 +289,9 @@ def combine(readings: list[Reading]) -> Reading:
         update={
             "title": _vote_whole_field(ordered, lambda s: s.title),
             "servings": _vote_whole_field(ordered, lambda s: s.servings),
+            "servings_range": _vote_whole_field(
+                ordered, lambda s: s.servings_range
+            ),
             "instructions": _vote_whole_field(ordered, lambda s: s.instructions),
             "ingredients": _combine_ingredients(ordered),
         }

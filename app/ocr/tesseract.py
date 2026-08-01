@@ -229,7 +229,11 @@ TRAILING_UNIT_WORDS: frozenset[str] = frozenset(
 # becomes `servings`. Printed as "SERVES 4 TO 6" on the test page. Small-caps
 # headers OCR badly, so this often finds nothing and we keep the schema
 # default.
-SERVINGS_RE = re.compile(r"\b(?:serves|makes|yield[s]?)\b[^\d]{0,10}(\d{1,2})", re.IGNORECASE)
+SERVINGS_RE = re.compile(
+    r"\b(?:serves|makes|yield[s]?)\b[^\d]{0,10}(\d{1,2})"
+    r"(?:\s*(?:to|-|–|—)\s*(\d{1,2}))?",
+    re.IGNORECASE,
+)
 
 # RULE (title): the title is the first run of up to TITLE_MAX_LINES consecutive
 # lines, from the top of the document, that look like title text: letters,

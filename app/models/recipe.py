@@ -17,6 +17,10 @@ class Recipe(Base):
     protein_type: Mapped[str | None] = mapped_column(String(50))
     cuisine: Mapped[str | None] = mapped_column(String(50))
     servings: Mapped[int] = mapped_column(Integer, default=2)
+    # Both endpoints of a printed range ("SERVES 4 TO 6" -> [4, 6]), mirroring
+    # ingredient range quantities. `servings` keeps the single displayed value
+    # (the low endpoint when a range exists). None for single-value recipes.
+    servings_range: Mapped[list | None] = mapped_column(JSON)
     instructions: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
     calories_per_serving: Mapped[int | None] = mapped_column(Integer)

@@ -303,6 +303,15 @@ def _instruction_lines(items, lines: list[str]) -> None:
             _instruction_lines(item, lines)
 
 
+def _int_range(value) -> list[int] | None:
+    """[lo, hi] when the yield states a range ("4 to 6 servings"), else None."""
+    for candidate in value if isinstance(value, list) else [value]:
+        nums = [int(n) for n in re.findall(r"\d+", str(candidate))]
+        if len(nums) >= 2 and nums[0] != nums[1]:
+            return sorted(nums[:2])
+    return None
+
+
 def _first_int(value) -> int | None:
     if isinstance(value, int):
         return value
@@ -342,6 +351,7 @@ def _map_json_ld(recipe: dict) -> dict:
     return {
         "title": str(recipe.get("name", "")).strip() or "Untitled recipe",
         "servings": _first_int(recipe.get("recipeYield", "")) or 2,
+        "servings_range": _int_range(recipe.get("recipeYield", "")),
         "instructions": "\n\n".join(numbered) if numbered else None,
         "notes": str(recipe.get("description", "")).strip() or None,
         "cuisine": cuisine,

@@ -1,7 +1,11 @@
+import logging
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.ocr import read_image
+from app.ocr.combine import combine
 from app.schemas.recipe import (
     RecipeCreate,
     RecipeList,
@@ -11,15 +15,20 @@ from app.schemas.recipe import (
 )
 from app.services import recipe_service
 from app.services.nutrition_service import calculate_recipe_nutrition
-from app.services.photo_service import (
-    PHOTOS_DIR,
-    extract_recipe_from_photos,
-    save_photo,
-)
+# extract_recipe_from_photos (the Claude photo path) is deliberately no
+# longer imported: photo extraction runs the local ensemble. The Claude code
+# stays in photo_service as a dormant backup, wired to nothing.
+from app.services.photo_service import PHOTOS_DIR, save_photo
 from app.services.shopping_service import generate_shopping_list
 from app.services.url_service import extract_recipe_from_url
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/recipes", tags=["recipes"])
+
+# The local voters, in the order they are attempted. Adding a voter later =
+# one entry here (and its priority in app/ocr/combine.py VOTER_PRIORITY).
+LOCAL_METHODS: tuple[str, ...] = ("apple_vision", "tesseract")
 
 
 @router.get("", response_model=list[RecipeList])
@@ -29,9 +38,18 @@ def list_recipes(db: Session = Depends(get_db)):
 
 @router.post("/extract-from-photo")
 def extract_from_photo(photos: list[UploadFile] = File(...)):
-    """Upload one or more cookbook photos → Claude extracts the recipe → returns data for review.
+    """Upload cookbook photos → the LOCAL ensemble reads them → data for review.
 
-    Accepts multiple files for recipes that span multiple pages.
+    Accepts multiple files for recipes spanning pages: upload order is page
+    order, first file is the title page (the GUI's starred page). Each local
+    method reads independently; the ROVER combiner merges the readings and
+    attaches per-ingredient confidence flags (agreement=high, single
+    voter=medium, disagreement=low) that the review form renders.
+
+    NO API call — per the owner's rule the extraction is fully local
+    (`claude` remains a deliberately dormant backup, wired to nothing).
+    A method that fails (e.g. the Vision binary not built) is skipped with a
+    log line; the endpoint fails only if EVERY method fails.
     """
     filenames = []
     photo_paths = []
@@ -40,18 +58,29 @@ def extract_from_photo(photos: list[UploadFile] = File(...)):
         filenames.append(filename)
         photo_paths.append(PHOTOS_DIR / filename)
 
-    result = extract_recipe_from_photos(photo_paths)
+    readings = []
+    errors: list[str] = []
+    for method in LOCAL_METHODS:
+        try:
+            readings.append(read_image(photo_paths, method=method))
+        except Exception as exc:  # noqa: BLE001 - per-voter isolation is the point
+            logger.warning("photo extraction: method %s failed: %s", method, exc)
+            errors.append(f"{method}: {exc}")
+    if not readings:
+        raise HTTPException(
+            status_code=500,
+            detail="All local extraction methods failed. " + " | ".join(errors),
+        )
 
-    # Claude now returns an array of recipes (may be 1 or more)
-    recipes = result if isinstance(result, list) else [result]
+    combined = combine(readings)
+    recipe = combined.schema.model_dump()
+    recipe["photo_filename"] = filenames[0]     # title page (starred first)
+    recipe["photo_filenames"] = filenames       # ALL pages, in order — no orphans
+    recipe.setdefault("meal_type", "dinner")
 
-    for recipe in recipes:
-        recipe["photo_filename"] = filenames[0]     # title page (starred first)
-        recipe["photo_filenames"] = filenames       # ALL pages, in order — no orphans
-        recipe.setdefault("meal_type", "dinner")
-
-    # Return array — frontend handles single or multiple
-    return recipes
+    # Return array — the frontend's review flow expects one; kept as an array
+    # for compatibility with the old multi-recipe Claude response shape.
+    return [recipe]
 
 
 @router.post("/extract-from-url")

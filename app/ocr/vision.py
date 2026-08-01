@@ -187,7 +187,12 @@ STEP_START_RE = re.compile(r"^\s*(\d{1,2})\s*[.)]\s*(.*)$")
 
 #: Header/footer metadata lines above the ingredients.
 COOK_INFO_RE = re.compile(r"^\s*(PREP|COOK|TOTAL|SERVES|MAKES|YIELD)\b", re.IGNORECASE)
-SERVES_RE = re.compile(r"\bSERVES\b[^\d]*(\d+)", re.IGNORECASE)
+# Captures both endpoints of "SERVES 4 TO 6" / "SERVES 4-6"; group 2 is None
+# for a single value. Ranges are stored as [lo, hi] (Cassie: like ingredient
+# range quantities), with `servings` keeping the low endpoint for display.
+SERVES_RE = re.compile(
+    r"\bSERVES\b[^\d]*(\d+)(?:\s*(?:TO|-|–|—)\s*(\d+))?", re.IGNORECASE
+)
 
 #: The sidebar heading that terminates the numbered steps.
 NOTE_HEADING_RE = re.compile(r"^\s*NOTES?\s*:?\s*$", re.IGNORECASE)
@@ -808,10 +813,13 @@ def parse_lines(vision: VisionOutput, photo_filename: str) -> PhotoExtractResult
     # Servings: "SERVES 4 TO 6" -> 4. Ranges take the low end; a human can
     # raise it during review. If absent, the schema default (2) stands.
     servings: int | None = None
+    servings_range: list[int] | None = None
     for line in lines:
         match = SERVES_RE.search(line.text)
         if match:
             servings = int(match.group(1))
+            if match.group(2):
+                servings_range = sorted([servings, int(match.group(2))])
             break
 
     fields: dict[str, Any] = {
@@ -825,6 +833,8 @@ def parse_lines(vision: VisionOutput, photo_filename: str) -> PhotoExtractResult
     }
     if servings is not None:
         fields["servings"] = servings
+    if servings_range is not None:
+        fields["servings_range"] = servings_range
     # meal_type and calories_per_serving are left at their schema defaults;
     # neither is reliably readable from a page image.
     return PhotoExtractResult(**fields)

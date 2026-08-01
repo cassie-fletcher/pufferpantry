@@ -24,6 +24,7 @@ def create_recipe(db: Session, data: RecipeCreate) -> Recipe:
         protein_type=data.protein_type,
         cuisine=data.cuisine,
         servings=data.servings,
+        servings_range=data.servings_range,
         source_type=data.source_type,
         source_details=data.source_details,
         instructions=data.instructions,

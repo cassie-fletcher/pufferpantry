@@ -36,6 +36,7 @@ class RecipeCreate(BaseModel):
     protein_type: str | None = None
     cuisine: str | None = None
     servings: int = 2
+    servings_range: list[int] | None = None
     source_type: str | None = None
     source_details: str | None = None
     instructions: str | None = None
@@ -57,6 +58,7 @@ class RecipeUpdate(BaseModel):
     protein_type: str | None = None
     cuisine: str | None = None
     servings: int | None = None
+    servings_range: list[int] | None = None
     source_type: str | None = None
     source_details: str | None = None
     instructions: str | None = None
@@ -79,6 +81,7 @@ class RecipeRead(BaseModel):
     protein_type: str | None
     cuisine: str | None
     servings: int
+    servings_range: list[int] | None
     source_type: str | None
     source_details: str | None
     instructions: str | None
@@ -122,6 +125,7 @@ class PhotoExtractResult(BaseModel):
     title: str
     meal_type: str = "dinner"
     servings: int = 2
+    servings_range: list[int] | None = None
     calories_per_serving: int | None = None
     instructions: str | None = None
     notes: str | None = None
@@ -159,6 +163,7 @@ class UrlExtractResult(BaseModel):
 
     title: str
     servings: int = 2
+    servings_range: list[int] | None = None
     protein_type: str | None = None
     cuisine: str | None = None
     calories_per_serving: int | None = None

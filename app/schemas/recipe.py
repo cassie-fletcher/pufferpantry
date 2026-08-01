@@ -13,6 +13,12 @@ class IngredientCreate(BaseModel):
     order: int = 0
     group: str = "Main"
     category: str | None = None
+    # "high" | "medium" | "low" — set by extraction (the Claude prompt already
+    # emits it; previously dropped here) and by the ROVER combiner (agreement
+    # -> high, single-voter -> medium, disagreement -> low). The review UI
+    # warns on low/medium (recipe-form.js). Not persisted to the DB — it is
+    # review-stage information.
+    amount_confidence: str | None = None
 
 
 class IngredientRead(IngredientCreate):
